@@ -6,6 +6,8 @@ class AI_Agent_Agent {
     private $cart;
     private $campaign;
     private $knowledge_base;
+    private $session_manager;
+    private $kb_adapter;
 
     public function __construct() {
         $this->conversation = new AI_Agent_Conversation();
@@ -13,6 +15,8 @@ class AI_Agent_Agent {
         $this->cart = new AI_Agent_Cart();
         $this->campaign = new AI_Agent_Campaign();
         $this->knowledge_base = new AI_Agent_Knowledge_Base();
+        $this->session_manager = new AI_Agent_Session_Manager();
+        $this->kb_adapter = AI_Agent_KB_Factory::create_from_settings();
     }
 
     public function handle_message($input, $session_id = null, $phone = null) {
@@ -35,7 +39,7 @@ class AI_Agent_Agent {
             return $this->format_response($offline_message, $conversation, 'offline');
         }
 
-        $context = $this->build_context($input['text'] ?? '', $conversation);
+        $context = $this->get_context_for_query($conversation, $input['text'] ?? $input['message']);
 
         $system_prompt = $this->build_system_prompt($conversation);
 
@@ -61,11 +65,192 @@ class AI_Agent_Agent {
 
         $this->conversation->increment_stats($conversation->id, $tokens_used);
 
+        $this->update_session_tokens($session_id, $tokens_used);
+
         return $this->format_response($response, $conversation, 'success', array(
             'intent' => $intent,
             'cart_items' => $this->cart->count_items($conversation->id),
-            'role' => $conversation->agent_role
+            'role' => $conversation->agent_role,
+            'cache_hit' => $this->session_manager->get_context($session_id) !== null
         ));
+    }
+
+    private function get_context_for_query($conversation, $query) {
+        $session_id = $conversation->session_id;
+
+        $cached_context = $this->session_manager->get_context($session_id);
+
+        if ($cached_context !== null && !empty($cached_context)) {
+            $this->log_cache_access($session_id, 'HIT');
+
+            $needs_refresh = $this->should_refresh_context($session_id, $query);
+            if ($needs_refresh) {
+                $this->refresh_context($session_id, $query);
+            }
+
+            return $this->session_manager->format_context_for_llm($cached_context);
+        }
+
+        $this->log_cache_access($session_id, 'MISS');
+        $context = $this->load_context($session_id, $query);
+
+        return $this->session_manager->format_context_for_llm($context);
+    }
+
+    private function should_refresh_context($session_id, $query) {
+        $tokens_used = $this->get_session_tokens($session_id);
+        $max_tokens = $this->get_max_context_tokens();
+
+        $tokens_per_query = (int) (strlen($query) / 4);
+
+        if (($tokens_used + $tokens_per_query) > ($max_tokens * 0.8)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function refresh_context($session_id, $query) {
+        $this->log_cache_access($session_id, 'REFRESH');
+
+        $context = $this->load_context($session_id, $query);
+
+        $this->session_manager->update_session($session_id, $context);
+    }
+
+    private function load_context($session_id, $query) {
+        $context = array();
+
+        if ($this->kb_adapter && $this->kb_adapter->is_connected()) {
+            $this->log_cache_access($session_id, 'EXTERNAL_KB');
+            $results = $this->kb_adapter->search($query, 5);
+
+            if (!isset($results['error']) && !empty($results)) {
+                $context = array_map(function($result) {
+                    return array(
+                        'title' => $result['title'] ?? 'Sin título',
+                        'content' => $result['text'] ?? '',
+                        'url' => $result['metadata']['url'] ?? '',
+                        'score' => $result['score'] ?? 0,
+                        'source' => 'external_kb'
+                    );
+                }, $results);
+            } else {
+                $context = $this->load_context_from_local($query);
+            }
+        } elseif ($this->kb_adapter && !$this->kb_adapter->is_connected()) {
+            $this->log_cache_access($session_id, 'EXTERNAL_KB_RECONNECT');
+            $this->kb_adapter->connect();
+
+            if ($this->kb_adapter->is_connected()) {
+                $results = $this->kb_adapter->search($query, 5);
+
+                if (!isset($results['error']) && !empty($results)) {
+                    $context = array_map(function($result) {
+                        return array(
+                            'title' => $result['title'] ?? 'Sin título',
+                            'content' => $result['text'] ?? '',
+                            'url' => $result['metadata']['url'] ?? '',
+                            'score' => $result['score'] ?? 0,
+                            'source' => 'external_kb'
+                        );
+                    }, $results);
+                } else {
+                    $context = $this->load_context_from_local($query);
+                }
+            } else {
+                $context = $this->load_context_from_local($query);
+            }
+        } else {
+            $context = $this->load_context_from_local($query);
+        }
+
+        $this->session_manager->update_session($session_id, $context);
+
+        return $context;
+    }
+
+    private function load_context_from_local($query) {
+        $relevant = $this->knowledge_base->find_relevant_context($query, 5);
+
+        $context = array();
+        foreach ($relevant as $item) {
+            $context[] = array(
+                'title' => $item['item']['title'] ?? 'Sin título',
+                'content' => $item['item']['content'] ?? '',
+                'url' => $item['item']['url'] ?? '',
+                'score' => $item['score'] ?? 0,
+                'source' => $item['item']['source'] ?? 'local'
+            );
+        }
+
+        return $context;
+    }
+
+    private function get_session_tokens($session_id) {
+        $cache = AI_Agent_Session_Cache::get_instance();
+        $context = $cache->get($session_id);
+
+        if ($context === null) {
+            return 0;
+        }
+
+        $tokens = 0;
+        foreach ($context as $item) {
+            $tokens += strlen($item['content'] ?? json_encode($item)) / 4;
+        }
+
+        return (int) $tokens;
+    }
+
+    private function update_session_tokens($session_id, $tokens) {
+        $cache = AI_Agent_Session_Cache::get_instance();
+        $current_context = $cache->get($session_id);
+
+        if ($current_context === null) {
+            return;
+        }
+
+        $new_tokens = $tokens;
+        foreach ($current_context as $item) {
+            $new_tokens += strlen($item['content'] ?? json_encode($item)) / 4;
+        }
+
+        $max_tokens = $this->get_max_context_tokens();
+        if ($new_tokens > $max_tokens) {
+            $current_context = $this->trim_context($current_context, $max_tokens * 0.9);
+            $cache->set($session_id, $current_context);
+        }
+    }
+
+    private function get_max_context_tokens() {
+        return (int) get_option('ai_agent_max_context_tokens', 8000);
+    }
+
+    private function trim_context($context, $max_tokens) {
+        usort($context, function($a, $b) {
+            return ($b['score'] ?? 0) - ($a['score'] ?? 0);
+        });
+
+        $trimmed = array();
+        $total_tokens = 0;
+
+        foreach ($context as $item) {
+            $item_tokens = strlen($item['content'] ?? json_encode($item)) / 4;
+
+            if (($total_tokens + $item_tokens) <= $max_tokens) {
+                $trimmed[] = $item;
+                $total_tokens += $item_tokens;
+            }
+        }
+
+        return $trimmed;
+    }
+
+    private function log_cache_access($session_id, $status) {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("AI Agent Cache [{$session_id}]: {$status} - " . date('Y-m-d H:i:s'));
+        }
     }
 
     private function detect_source($input) {
@@ -312,37 +497,6 @@ class AI_Agent_Agent {
         return $base_prompt;
     }
 
-    private function build_context($query, $conversation) {
-        $context_parts = array();
-
-        $relevant = $this->knowledge_base->find_relevant_context($query, 5);
-        $context_text = $this->knowledge_base->format_context_for_llm($relevant);
-
-        if (!empty($context_text)) {
-            $context_parts[] = "Información del sitio:\n" . $context_text;
-        }
-
-        if ($conversation->agent_role === 'vendor' && class_exists('WooCommerce')) {
-            $fiche = new AI_Agent_Product_Fiche();
-            $products = $fiche->search($query, 5);
-
-            if (!empty($products)) {
-                $product_context = "Productos disponibles:\n";
-                foreach ($products as $p) {
-                    $price_text = $p->sale_price ? " (OFERTA: {$p->sale_price})" : " ({$p->price})";
-                    $product_context .= "- {$p->name}{$price_text}\n";
-                    if ($p->short_description) {
-                        $product_context .= "  {$p->short_description}\n";
-                    }
-                    $product_context .= "  SKU: {$p->sku} | ID: {$p->product_id}\n\n";
-                }
-                $context_parts[] = $product_context;
-            }
-        }
-
-        return implode("\n\n", $context_parts);
-    }
-
     private function process_response($response, $conversation, $intent) {
         $response = $this->handle_cart_commands($response, $conversation, $intent);
 
@@ -386,7 +540,7 @@ class AI_Agent_Agent {
 
                 $response = str_replace(
                     "[BUY_NOW:{$product_id}]",
-                    "\n\n👉 [完成购买]({$checkout_url})",
+                    "\n\n👉 [Proceder al pago]({$checkout_url})",
                     $response
                 );
             }
@@ -508,6 +662,10 @@ class AI_Agent_Agent {
             $response['cart_url'] = $this->cart->get_checkout_url($conversation->id);
         }
 
+        if (isset($extra['cache_hit'])) {
+            $response['cache_hit'] = $extra['cache_hit'];
+        }
+
         return $response;
     }
 
@@ -553,6 +711,27 @@ class AI_Agent_Agent {
             'messages' => $messages,
             'cart' => $cart_items,
             'cart_total' => $this->cart->get_total($conversation->id)
+        );
+    }
+
+    public function clear_session_cache($session_id) {
+        $this->session_manager->invalidate_session($session_id);
+    }
+
+    public function get_cache_stats() {
+        $cache = AI_Agent_Session_Cache::get_instance();
+        return $cache->get_stats();
+    }
+
+    public function get_kb_adapter_stats() {
+        if (!$this->kb_adapter) {
+            return array('type' => 'local', 'connected' => false);
+        }
+
+        return array(
+            'type' => get_option('ai_agent_kb_type', 'local'),
+            'connected' => $this->kb_adapter->is_connected(),
+            'stats' => $this->kb_adapter->get_stats()
         );
     }
 }
