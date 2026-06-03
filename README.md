@@ -18,6 +18,7 @@ El agente tiene comportamiento inteligente con roles configurables (asesor/vende
 - **Documentos personalizados**: Crea documentos de conocimiento adicionales desde el admin
 - **Scheduler automático**: Indexación horaria automática para mantener la base de conocimiento actualizada
 - **Límites de tokens configurables**: Control del contexto para optimizar costos
+- **Session Cache**: Respuestas rápidas con caché de contexto por sesión
 
 ### 🎭 Comportamiento del Agente
 
@@ -31,6 +32,21 @@ El agente tiene comportamiento inteligente con roles configurables (asesor/vende
 - **Campañas y promociones**: Mensajes personalizados con códigos de descuento
 - **Validación de códigos**: Detecta y valida códigos de descuento en la conversación
 - **Detección de intención**: greeting, purchase, price_inquiry, discount, product_browse, view_cart, checkout, business_hours, general
+
+### 🗄️ Base de Conocimiento Externa
+
+El plugin soporta conexión a servicios externos de base de conocimiento vectorial:
+
+- **Pinecone**: Vector database cloud
+- **PostgreSQL + pgvector**: Tu propio servidor con extensión vectorial
+- **Supabase**: PostgreSQL managed con REST API
+- **Custom API**: Cualquier endpoint que siga el protocolo del plugin
+
+**Beneficios**:
+- Compartida entre múltiples sitios WordPress
+- Mejor rendimiento para grandes volúmenes de datos
+- Búsqueda semántica más precisa
+- Caché de sesión para respuestas rápidas
 
 ### 🛒 WooCommerce Integration
 
@@ -88,11 +104,19 @@ El agente tiene comportamiento inteligente con roles configurables (asesor/vende
 │  │  └──────────┘ └──────────┘ └──────────┘ └────────┘ │  │
 │  └─────────────────────────┬──────────────────────────┘  │
 │                            │                              │
+│  ┌─────────────────────────┼─────────────────────────────┐ │
+│  │                 SESSION CACHE                        │ │
+│  │  ┌────────────────────────────────────────────────┐   │ │
+│  │  │  Session_{id} = {context, tokens, last_access} │   │ │
+│  │  └────────────────────────────────────────────────┘   │ │
+│  └─────────────────────────┬─────────────────────────────┘ │
+│                            │                              │
 │  ┌─────────────────────────┴──────────────────────────┐  │
 │  │                 KNOWLEDGE BASE                     │  │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌────────────┐  │  │
-│  │  │   Pages     │  │  Products   │  │  Documents │  │  │
-│  │  │  (Indexed)  │  │  (Fiches)   │  │  (Custom)  │  │  │
+│  │  │   Local     │  │  External   │  │  Products │  │  │
+│  │  │  (MySQL)    │  │  (Pinecone  │  │  (WC)     │  │  │
+│  │  │             │  │   PG/Supa) │  │           │  │  │
 │  │  └─────────────┘  └─────────────┘  └────────────┘  │  │
 │  └────────────────────────────────────────────────────┘  │
 │                            │                              │
@@ -119,14 +143,43 @@ El agente tiene comportamiento inteligente con roles configurables (asesor/vende
 4. Configura tu proveedor de LLM y agrega las API keys necesarias
 5. Selecciona las páginas para la base de conocimiento
 6. Configura el comportamiento del agente (rol, horarios, campañas)
-7. Personaliza la apariencia del widget
-8. Activa el widget desde la configuración
+7. **Opcional**: Configura conexión a base de conocimiento externa (Pinecone, PostgreSQL, Supabase)
+8. Personaliza la apariencia del widget
+9. Activa el widget desde la configuración
+
+## Configuración de Base de Conocimiento Externa
+
+### Pinecone
+1. Crea una cuenta en [Pinecone](https://www.pinecone.io/)
+2. Crea un proyecto y obtén el API URL y API Key
+3. En el plugin, selecciona "Pinecone" como tipo de servicio
+4. Ingresa el endpoint y API Key
+5. Prueba la conexión
+
+### PostgreSQL + pgvector
+1. Instala PostgreSQL con la extensión pgvector
+2. Crea una tabla para el knowledge base (el plugin lo hace automáticamente)
+3. Selecciona "PostgreSQL + pgvector" como tipo de servicio
+4. Ingresa la conexión: `host:port/database`
+
+### Supabase
+1. Crea un proyecto en [Supabase](https://supabase.com/)
+2. Obtén el API Key y Project ID
+3. Crea una tabla llamada `ai_agent_knowledge` con columnas:
+   - `id` (text, primary key)
+   - `title` (text)
+   - `content` (text)
+   - `embedding` (text, para vectores en base64)
+4. Selecciona "Supabase" como tipo de servicio
+
+### Configuración de Sync
+- **Sincronización automática**: El plugin puede sincronizar contenido periódicamente
+- **Intervalo configurable**: Cada 15 min a diario
+- **Fallback local**: Si el servicio externo falla, usa la base local
 
 ## Configuración
 
 ### Configuración de LLM
-
-En la pestaña "LLM" puedes elegir entre:
 
 | Proveedor | Modelos | Notas |
 |-----------|---------|-------|
@@ -212,53 +265,18 @@ https://tu-sitio.com/wp-json/ai-agent/v1/webhook
 1. Configura el webhook de tu app de Meta Business
 2. Asegúrate de que el payload contenga `entry[0].changes[0].value.messages`
 
-## API REST
+## Session Cache
 
-### Endpoint: Webhook
+El plugin implementa un sistema de caché por sesión para respuestas rápidas:
 
-**URL**: `/wp-json/ai-agent/v1/webhook`
+1. **Primera consulta**: Busca en la base vectorial externa y carga los contextos más relevantes
+2. **Consultas siguientes**: Usa el contexto cacheado (no vuelve a buscar)
+3. **TTL**: El caché expira después de 15-30 minutos de inactividad
+4. **Auto-refresh**: Cuando los tokens usados se acercan al límite, recarga contexto
 
-**Método**: POST
-
-**Headers**:
-- `Content-Type: application/json`
-- `X-Webhook-Signature: <secret>` (opcional, para verificación HMAC)
-
-**Payload para Twilio**:
-```json
-{
-  "From": "+1234567890",
-  "Body": "Hola, necesito información sobre...",
-  "To": "+0987654321"
-}
-```
-
-**Payload para Meta WhatsApp**:
-```json
-{
-  "entry": [{
-    "changes": [{
-      "value": {
-        "messages": [{
-          "from": "1234567890",
-          "text": { "body": "Hola" }
-        }]
-      }
-    }]
-  }]
-}
-```
-
-**Respuesta**:
-```json
-{
-  "source": "twilio",
-  "success": true,
-  "response": "¡Hola! ¿En qué puedo ayudarte?",
-  "session_id": "conv_abc123...",
-  "conversation_id": 1
-}
-```
+**Rendimiento esperado**:
+- Primera consulta: 500-2000ms (depende del servicio externo)
+- Consultas en caché: <100ms
 
 ## Base de Datos
 
@@ -274,12 +292,14 @@ El plugin crea las siguientes tablas:
 | `ai_agent_cart` | Carrito de compras por conversación |
 | `ai_agent_metrics_daily` | Métricas diarias agregadas |
 | `ai_agent_token_usage` | Uso de tokens por modelo LLM |
+| `ai_agent_session_cache` | Caché de contexto por sesión |
 
 ## Scheduler
 
 El plugin ejecuta automáticamente:
 
 - **Indexación hourly**: Verifica cambios en páginas y productos cada hora
+- **Sync a externo**: Sincroniza contenido al servicio externo según intervalo configurado
 - **Métricas daily**: Actualiza métricas diarias a medianoche
 - **Cleanup daily**: Limpia datos antiguos según retención configurada (90 días por defecto)
 
@@ -312,6 +332,16 @@ add_filter('ai_agent_cart_url', function($url, $conversation_id) {
 }, 10, 2);
 ```
 
+### `ai_agent_custom_kb_search_payload`
+Permite modificar el payload enviado a APIs custom.
+
+```php
+add_filter('ai_agent_custom_kb_search_payload', function($payload, $config) {
+    $payload['custom_param'] = 'value';
+    return $payload;
+}, 10, 2);
+```
+
 ## FAQs
 
 ### ¿Puedo usar el plugin sin API key de OpenAI?
@@ -335,7 +365,28 @@ Cuando el agente tiene rol "vendedor" y detecta intención de compra, puede agre
 ### ¿Qué métricas puedo ver?
 Puedes ver: conversaciones totales, mensajes, tokens usados, costo en USD, consumo por modelo LLM, métricas diarias con gráficos, y historial de conversaciones.
 
+### ¿Puedo conectar a Pinecone, PostgreSQL o Supabase?
+Sí, el plugin soporta:
+- **Pinecone**: Vector database cloud
+- **PostgreSQL + pgvector**: Tu propio servidor
+- **Supabase**: PostgreSQL managed
+- **Custom API**: Cualquier endpoint compatible
+
+Esto permite compartir la base de conocimiento entre múltiples sitios WordPress.
+
+### ¿Cómo funciona el Session Cache?
+El Session Cache permite respuestas rápidas sin buscar en la base vectorial en cada consulta:
+1. Primera consulta: Busca en la KB externa, carga top resultados, guarda en caché
+2. Consultas siguientes: Usa el contexto cacheado
+3. El caché expira según el TTL configurado (15-30 min por defecto)
+4. Cuando los tokens se acercan al límite, recarga contexto automáticamente
+
 ## Changelog
+
+### 1.0.1
+- Añadido soporte para base de conocimiento externa (Pinecone, PostgreSQL, Supabase, Custom API)
+- Implementado Session Cache para respuestas rápidas
+- Mejorado sistema de sync automático
 
 ### 1.0.0
 - Versión inicial completa

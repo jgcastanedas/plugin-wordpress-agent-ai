@@ -365,3 +365,41 @@ add_action('wp_ajax_ai_agent_force_reindex', function() {
         'message' => 'Re-indexación completada'
     ));
 });
+
+add_action('wp_ajax_ai_agent_test_kb_connection', function() {
+    check_ajax_referer('ai_agent_admin', 'nonce');
+
+    $type = sanitize_text_field($_POST['type'] ?? 'local');
+    $host = esc_url_raw($_POST['host'] ?? '');
+    $api_key = sanitize_text_field($_POST['api_key'] ?? '');
+    $index_name = sanitize_text_field($_POST['index_name'] ?? 'ai-agent-kb');
+
+    if ($type === 'local') {
+        wp_send_json_success(array('vectors' => 0, 'message' => 'Usando base local'));
+    }
+
+    $config = array(
+        'host' => $host,
+        'api_key' => $api_key,
+        'index_name' => $index_name
+    );
+
+    $adapter = AI_Agent_KB_Factory::create($type, $config);
+
+    if (!$adapter) {
+        wp_send_json_error('Adapter no disponible para el tipo: ' . $type);
+    }
+
+    $result = $adapter->connect();
+
+    if ($result) {
+        $stats = $adapter->get_stats();
+        $adapter->disconnect();
+        wp_send_json_success(array(
+            'vectors' => $stats['total_vectors'] ?? 0,
+            'message' => 'Conexión exitosa'
+        ));
+    } else {
+        wp_send_json_error('No se pudo conectar al servicio');
+    }
+});

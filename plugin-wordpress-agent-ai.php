@@ -25,6 +25,8 @@ define('AI_AGENT_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-loader.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-database.php';
+require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-kb-adapter.php';
+require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-session-cache.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-settings.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-knowledge-base.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-scheduler.php';

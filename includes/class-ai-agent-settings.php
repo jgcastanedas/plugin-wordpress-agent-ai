@@ -79,6 +79,14 @@ class AI_Agent_Settings {
         register_setting($this->options_group, 'ai_agent_token_limit_warning', array('sanitize_callback' => 'sanitize_text_field'));
         register_setting($this->options_group, 'ai_agent_max_context_tokens', array('sanitize_callback' => 'sanitize_text_field'));
 
+        register_setting($this->options_group, 'ai_agent_kb_type', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_kb_host', array('sanitize_callback' => 'esc_url_raw'));
+        register_setting($this->options_group, 'ai_agent_kb_api_key', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_kb_index_name', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_kb_sync_enabled', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_kb_sync_interval', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_kb_fallback_local', array('sanitize_callback' => 'sanitize_text_field'));
+
         add_settings_section('llm_settings', __('Configuración de LLM', 'ai-agent-chatbot'), array($this, 'llm_section_callback'), $this->options_page);
         add_settings_section('knowledge_settings', __('Base de Conocimiento', 'ai-agent-chatbot'), array($this, 'knowledge_section_callback'), $this->options_page);
         add_settings_section('webhook_settings', __('Configuración de Webhook', 'ai-agent-chatbot'), array($this, 'webhook_section_callback'), $this->options_page);
@@ -88,7 +96,8 @@ class AI_Agent_Settings {
         add_settings_section('widget_appearance', __('Apariencia del Widget', 'ai-agent-chatbot'), array($this, 'widget_appearance_section_callback'), $this->options_page);
         add_settings_section('widget_colors', __('Colores', 'ai-agent-chatbot'), array($this, 'widget_colors_section_callback'), $this->options_page);
         add_settings_section('widget_typography', __('Tipografía', 'ai-agent-chatbot'), array($this, 'widget_typography_section_callback'), $this->options_page);
-        add_settings_section('widget_dimensions', __('Dimensiones', 'ai-agent-chatbot'), array($this, 'widget_dimensions_section_callback'), $this->options_page');
+        add_settings_section('widget_dimensions', __('Dimensiones', 'ai-agent-chatbot'), array($this, 'widget_dimensions_section_callback'), $this->options_page);
+        add_settings_section('kb_external_settings', __('Base de Conocimiento Externa', 'ai-agent-chatbot'), array($this, 'kb_external_section_callback'), $this->options_page);
 
         add_settings_field('ai_agent_llm_provider', __('Proveedor de LLM', 'ai-agent-chatbot'), array($this, 'render_llm_provider_field'), $this->options_page, 'llm_settings');
         add_settings_field('ai_agent_openai_key', __('OpenAI API Key', 'ai-agent-chatbot'), array($this, 'render_openai_key_field'), $this->options_page, 'llm_settings');
@@ -139,6 +148,15 @@ class AI_Agent_Settings {
         add_settings_field('ai_agent_chat_border_radius', __('Border Radius', 'ai-agent-chatbot'), array($this, 'render_chat_border_radius_field'), $this->options_page, 'widget_dimensions');
         add_settings_field('ai_agent_button_size', __('Tamaño Botón', 'ai-agent-chatbot'), array($this, 'render_button_size_field'), $this->options_page, 'widget_dimensions');
         add_settings_field('ai_agent_message_spacing', __('Espaciado Mensajes', 'ai-agent-chatbot'), array($this, 'render_message_spacing_field'), $this->options_page, 'widget_dimensions');
+
+        add_settings_field('ai_agent_kb_type', __('Tipo de Servicio', 'ai-agent-chatbot'), array($this, 'render_kb_type_field'), $this->options_page, 'kb_external_settings');
+        add_settings_field('ai_agent_kb_host', __('Endpoint/API URL', 'ai-agent-chatbot'), array($this, 'render_kb_host_field'), $this->options_page, 'kb_external_settings');
+        add_settings_field('ai_agent_kb_api_key', __('API Key', 'ai-agent-chatbot'), array($this, 'render_kb_api_key_field'), $this->options_page, 'kb_external_settings');
+        add_settings_field('ai_agent_kb_index_name', __('Nombre del Índice/Tabla', 'ai-agent-chatbot'), array($this, 'render_kb_index_name_field'), $this->options_page, 'kb_external_settings');
+        add_settings_field('ai_agent_kb_sync_enabled', __('Sincronización Automática', 'ai-agent-chatbot'), array($this, 'render_kb_sync_enabled_field'), $this->options_page, 'kb_external_settings');
+        add_settings_field('ai_agent_kb_sync_interval', __('Intervalo de Sync', 'ai-agent-chatbot'), array($this, 'render_kb_sync_interval_field'), $this->options_page, 'kb_external_settings');
+        add_settings_field('ai_agent_kb_fallback_local', __('Fallback a Local', 'ai-agent-chatbot'), array($this, 'render_kb_fallback_local_field'), $this->options_page, 'kb_external_settings');
+        add_settings_field('ai_agent_kb_test_connection', __('Test Conexión', 'ai-agent-chatbot'), array($this, 'render_kb_test_connection_field'), $this->options_page, 'kb_external_settings');
     }
 
     public function llm_section_callback() {
@@ -689,6 +707,136 @@ class AI_Agent_Settings {
         }
 
         return $sanitized;
+    }
+
+    public function kb_external_section_callback() {
+        echo '<p>' . __('Configura la conexión a servicios externos de base de conocimiento vectorial', 'ai-agent-chatbot') . '</p>';
+    }
+
+    public function render_kb_type_field() {
+        $value = get_option('ai_agent_kb_type', 'local');
+        $types = AI_Agent_KB_Factory::get_available_types();
+        ?>
+        <select name="ai_agent_kb_type" id="ai_agent_kb_type">
+            <?php foreach ($types as $key => $label) : ?>
+                <option value="<?php echo esc_attr($key); ?>" <?php selected($value, $key); ?>><?php echo esc_html($label); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <p class="description">Selecciona el servicio de base de conocimiento vectorial que usarás</p>
+        <?php
+    }
+
+    public function render_kb_host_field() {
+        $value = get_option('ai_agent_kb_host', '');
+        echo '<input type="text" name="ai_agent_kb_host" value="' . esc_attr($value) . '" class="regular-text" style="width: 400px;" placeholder="https://your-pinecone-project.env.io" />';
+        echo '<p class="description">URL del endpoint de tu servicio (Pinecone, PostgreSQL, Supabase, etc.)</p>';
+    }
+
+    public function render_kb_api_key_field() {
+        $value = get_option('ai_agent_kb_api_key', '');
+        echo '<input type="password" name="ai_agent_kb_api_key" value="' . esc_attr($value) . '" class="regular-text" style="width: 400px;" placeholder="API Key de tu servicio" />';
+    }
+
+    public function render_kb_index_name_field() {
+        $value = get_option('ai_agent_kb_index_name', 'ai-agent-kb');
+        echo '<input type="text" name="ai_agent_kb_index_name" value="' . esc_attr($value) . '" class="regular-text" style="width: 250px;" />';
+        echo '<p class="description">Nombre del índice en Pinecone, tabla en PostgreSQL/Supabase</p>';
+    }
+
+    public function render_kb_sync_enabled_field() {
+        $value = get_option('ai_agent_kb_sync_enabled', 'yes');
+        ?>
+        <label><input type="checkbox" name="ai_agent_kb_sync_enabled" value="yes" <?php checked($value, 'yes'); ?> /> Sincronizar automáticamente</label>
+        <p class="description">Sincroniza el contenido de WordPress al servicio externo periódicamente</p>
+        <?php
+    }
+
+    public function render_kb_sync_interval_field() {
+        $value = get_option('ai_agent_kb_sync_interval', '60');
+        ?>
+        <select name="ai_agent_kb_sync_interval" id="ai_agent_kb_sync_interval">
+            <option value="15" <?php selected($value, '15'); ?>>Cada 15 minutos</option>
+            <option value="30" <?php selected($value, '30'); ?>>Cada 30 minutos</option>
+            <option value="60" <?php selected($value, '60'); ?>>Cada hora</option>
+            <option value="180" <?php selected($value, '180'); ?>>Cada 3 horas</option>
+            <option value="360" <?php selected($value, '360'); ?>>Cada 6 horas</option>
+            <option value="720" <?php selected($value, '720'); ?>>Cada 12 horas</option>
+            <option value="1440" <?php selected($value, '1440'); ?>>Diario</option>
+        </select>
+        <?php
+    }
+
+    public function render_kb_fallback_local_field() {
+        $value = get_option('ai_agent_kb_fallback_local', 'yes');
+        ?>
+        <label><input type="checkbox" name="ai_agent_kb_fallback_local" value="yes" <?php checked($value, 'yes'); ?> /> Usar base de conocimiento local si el servicio externo falla</label>
+        <?php
+    }
+
+    public function render_kb_test_connection_field() {
+        echo '<button type="button" class="button" id="ai_agent_test_kb_connection">' . __('Probar Conexión', 'ai-agent-chatbot') . '</button>';
+        echo '<span id="ai_agent_kb_test_result" style="margin-left: 10px;"></span>';
+        ?>
+        <script>
+        jQuery(document).ready(function($) {
+            $('#ai_agent_kb_type').on('change', function() {
+                var type = $(this).val();
+                var $host = $('#ai_agent_kb_host');
+                var $key = $('#ai_agent_kb_api_key');
+
+                if (type === 'postgresql') {
+                    $host.attr('placeholder', 'postgres://user:pass@host:5432/database');
+                } else if (type === 'pinecone') {
+                    $host.attr('placeholder', 'https://your-project.svc.your-region.pinecone.io');
+                } else if (type === 'supabase') {
+                    $host.attr('placeholder', 'No requerido para Supabase');
+                } else {
+                    $host.attr('placeholder', 'https://your-api.com');
+                }
+            });
+
+            $('#ai_agent_test_kb_connection').on('click', function() {
+                var $btn = $(this);
+                var $result = $('#ai_agent_kb_test_result');
+
+                $btn.prop('disabled', true).text('Probando...');
+                $result.text('');
+
+                $.post(ajaxurl, {
+                    action: 'ai_agent_test_kb_connection',
+                    nonce: '<?php echo wp_create_nonce('ai_agent_admin'); ?>',
+                    type: $('#ai_agent_kb_type').val(),
+                    host: $('#ai_agent_kb_host').val(),
+                    api_key: $('#ai_agent_kb_api_key').val(),
+                    index_name: $('#ai_agent_kb_index_name').val()
+                }, function(response) {
+                    $btn.prop('disabled', false).text('Probar Conexión');
+
+                    if (response.success) {
+                        $result.html('<span style="color: green;">✓ Conexión exitosa (' + response.data.vectors + ' vectores)</span>');
+                    } else {
+                        $result.html('<span style="color: red;">✗ Error: ' + response.data + '</span>');
+                    }
+                }).fail(function() {
+                    $btn.prop('disabled', false).text('Probar Conexión');
+                    $result.html('<span style="color: red;">✗ Error de conexión</span>');
+                });
+            });
+        });
+        </script>
+        <?php
+    }
+
+    public static function get_kb_config() {
+        return array(
+            'type' => get_option('ai_agent_kb_type', 'local'),
+            'host' => get_option('ai_agent_kb_host', ''),
+            'api_key' => get_option('ai_agent_kb_api_key', ''),
+            'index_name' => get_option('ai_agent_kb_index_name', 'ai-agent-kb'),
+            'sync_enabled' => get_option('ai_agent_kb_sync_enabled', 'yes') === 'yes',
+            'sync_interval' => intval(get_option('ai_agent_kb_sync_interval', '60')),
+            'fallback_local' => get_option('ai_agent_kb_fallback_local', 'yes') === 'yes'
+        );
     }
 
     public static function get_llm_config() {
