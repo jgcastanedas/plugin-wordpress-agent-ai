@@ -1,0 +1,75 @@
+.ai-agent-admin-wrap {
+    max-width: 1200px;
+}
+
+.ai-agent-status-card {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+
+.ai-agent-status-card h2 {
+    margin-top: 0;
+    font-size: 18px;
+}
+
+.ai-agent-actions {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.ai-agent-actions h2 {
+    margin-top: 0;
+}
+
+.ai-agent-documents-list {
+    margin-top: 20px;
+}
+
+.ai-agent-documents-list table {
+    width: 100%;
+}
+
+.ai-agent-documents-list th {
+    text-align: left;
+    padding: 10px;
+    border-bottom: 2px solid #eaeaea;
+}
+
+.ai-agent-documents-list td {
+    padding: 10px;
+    border-bottom: 1px solid #eaeaea;
+}
+
+.ai-agent-documents-list .row-actions {
+    color: #72777c;
+}
+
+#ai_agent_selected_pages {
+    min-height: 200px;
+}
+
+.ai-agent-embeddings-progress {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f0f2f5;
+    border-radius: 4px;
+}
+
+.ai-agent-embeddings-progress .progress-bar {
+    height: 20px;
+    background: #eaeaea;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 10px;
+}
+
+.ai-agent-embeddings-progress .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    transition: width 0.3s ease;
+}

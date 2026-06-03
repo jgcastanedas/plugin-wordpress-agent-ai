@@ -1,0 +1,11 @@
+# AI Agent Chatbot Widget - Base Styles
+
+.ai-agent-chat-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ai-agent-chat-button svg {
+    flex-shrink: 0;
+}
