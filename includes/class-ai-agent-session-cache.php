@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 class AI_Agent_Session_Cache {
     private static $instance = null;
     private $cache = array();

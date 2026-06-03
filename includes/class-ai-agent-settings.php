@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 class AI_Agent_Settings {
     private $options_group = 'ai_agent_options';
     private $options_page = 'ai_agent_settings';
@@ -87,6 +91,21 @@ class AI_Agent_Settings {
         register_setting($this->options_group, 'ai_agent_kb_sync_interval', array('sanitize_callback' => 'sanitize_text_field'));
         register_setting($this->options_group, 'ai_agent_kb_fallback_local', array('sanitize_callback' => 'sanitize_text_field'));
 
+        register_setting($this->options_group, 'ai_agent_openai_model', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_anthropic_model', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_require_email_for_order', array('sanitize_callback' => 'sanitize_text_field'));
+
+        register_setting($this->options_group, 'ai_agent_deepseek_key', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_deepseek_model', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_kimi_key', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_kimi_model', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_minimax_key', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_minimax_model', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting($this->options_group, 'ai_agent_streaming_enabled', array('sanitize_callback' => 'sanitize_text_field'));
+
+        register_setting($this->options_group, 'ai_agent_allowed_languages', array('sanitize_callback' => array($this, 'sanitize_languages')));
+        register_setting($this->options_group, 'ai_agent_default_language', array('sanitize_callback' => 'sanitize_text_field'));
+
         add_settings_section('llm_settings', __('Configuración de LLM', 'ai-agent-chatbot'), array($this, 'llm_section_callback'), $this->options_page);
         add_settings_section('knowledge_settings', __('Base de Conocimiento', 'ai-agent-chatbot'), array($this, 'knowledge_section_callback'), $this->options_page);
         add_settings_section('webhook_settings', __('Configuración de Webhook', 'ai-agent-chatbot'), array($this, 'webhook_section_callback'), $this->options_page);
@@ -114,6 +133,19 @@ class AI_Agent_Settings {
 
         add_settings_field('ai_agent_default_role', __('Rol del Agente', 'ai-agent-chatbot'), array($this, 'render_default_role_field'), $this->options_page, 'agent_behavior');
         add_settings_field('ai_agent_allow_checkout', __('Permitir Checkout', 'ai-agent-chatbot'), array($this, 'render_allow_checkout_field'), $this->options_page, 'agent_behavior');
+        add_settings_field('ai_agent_require_email_for_order', __('Verificación de pedidos', 'ai-agent-chatbot'), array($this, 'render_require_email_for_order_field'), $this->options_page, 'agent_behavior');
+        add_settings_field('ai_agent_openai_model', __('Modelo OpenAI', 'ai-agent-chatbot'), array($this, 'render_openai_model_field'), $this->options_page, 'llm_settings');
+        add_settings_field('ai_agent_anthropic_model', __('Modelo Anthropic', 'ai-agent-chatbot'), array($this, 'render_anthropic_model_field'), $this->options_page, 'llm_settings');
+        add_settings_field('ai_agent_deepseek_key', __('DeepSeek API Key', 'ai-agent-chatbot'), array($this, 'render_deepseek_key_field'), $this->options_page, 'llm_settings');
+        add_settings_field('ai_agent_deepseek_model', __('Modelo DeepSeek', 'ai-agent-chatbot'), array($this, 'render_deepseek_model_field'), $this->options_page, 'llm_settings');
+        add_settings_field('ai_agent_kimi_key', __('Kimi (Moonshot) API Key', 'ai-agent-chatbot'), array($this, 'render_kimi_key_field'), $this->options_page, 'llm_settings');
+        add_settings_field('ai_agent_kimi_model', __('Modelo Kimi', 'ai-agent-chatbot'), array($this, 'render_kimi_model_field'), $this->options_page, 'llm_settings');
+        add_settings_field('ai_agent_minimax_key', __('MiniMax API Key', 'ai-agent-chatbot'), array($this, 'render_minimax_key_field'), $this->options_page, 'llm_settings');
+        add_settings_field('ai_agent_minimax_model', __('Modelo MiniMax', 'ai-agent-chatbot'), array($this, 'render_minimax_model_field'), $this->options_page, 'llm_settings');
+        add_settings_field('ai_agent_streaming_enabled', __('Streaming de respuestas', 'ai-agent-chatbot'), array($this, 'render_streaming_enabled_field'), $this->options_page, 'llm_settings');
+
+        add_settings_field('ai_agent_allowed_languages', __('Idiomas permitidos', 'ai-agent-chatbot'), array($this, 'render_allowed_languages_field'), $this->options_page, 'agent_behavior');
+        add_settings_field('ai_agent_default_language', __('Idioma por defecto', 'ai-agent-chatbot'), array($this, 'render_default_language_field'), $this->options_page, 'agent_behavior');
         add_settings_field('ai_agent_greeting_primary', __('Mensaje de Saludo', 'ai-agent-chatbot'), array($this, 'render_greeting_primary_field'), $this->options_page, 'agent_behavior');
         add_settings_field('ai_agent_offline_message', __('Mensaje Fuera de Horario', 'ai-agent-chatbot'), array($this, 'render_offline_message_field'), $this->options_page, 'agent_behavior');
 
@@ -203,10 +235,20 @@ class AI_Agent_Settings {
         $value = get_option('ai_agent_llm_provider', 'openai');
         ?>
         <select name="ai_agent_llm_provider" id="ai_agent_llm_provider">
-            <option value="openai" <?php selected($value, 'openai'); ?>>OpenAI (GPT-4)</option>
-            <option value="anthropic" <?php selected($value, 'anthropic'); ?>>Anthropic (Claude)</option>
-            <option value="ollama" <?php selected($value, 'ollama'); ?>>Ollama (Local)</option>
+            <optgroup label="<?php esc_attr_e('Occidentales', 'ai-agent-chatbot'); ?>">
+                <option value="openai" <?php selected($value, 'openai'); ?>>OpenAI (GPT-4o)</option>
+                <option value="anthropic" <?php selected($value, 'anthropic'); ?>>Anthropic (Claude)</option>
+            </optgroup>
+            <optgroup label="<?php esc_attr_e('Chinos (中国)', 'ai-agent-chatbot'); ?>">
+                <option value="deepseek" <?php selected($value, 'deepseek'); ?>>DeepSeek</option>
+                <option value="kimi" <?php selected($value, 'kimi'); ?>>Kimi / Moonshot</option>
+                <option value="minimax" <?php selected($value, 'minimax'); ?>>MiniMax</option>
+            </optgroup>
+            <optgroup label="<?php esc_attr_e('Locales', 'ai-agent-chatbot'); ?>">
+                <option value="ollama" <?php selected($value, 'ollama'); ?>>Ollama (Local)</option>
+            </optgroup>
         </select>
+        <p class="description">Proveedores chinos: APIs compatibles con OpenAI, soportan streaming.</p>
         <?php
     }
 
@@ -295,6 +337,142 @@ class AI_Agent_Settings {
         <label><input type="checkbox" name="ai_agent_allow_checkout" value="yes" <?php checked($value, 'yes'); ?> /> Permitir generar links de pago y checkout</label>
         <p class="description">Si está desactivado, el agente solo hará asesoría pero no podrá generar links de compra</p>
         <?php
+    }
+
+    public function render_require_email_for_order_field() {
+        $value = get_option('ai_agent_require_email_for_order', 'no');
+        ?>
+        <label><input type="checkbox" name="ai_agent_require_email_for_order" value="yes" <?php checked($value, 'yes'); ?> /> Exigir email para mostrar estado de pedido</label>
+        <p class="description"><strong style="color:#b91c1c;">Recomendado activar.</strong> Si está desactivado, cualquiera con un número de pedido puede ver su estado (los IDs son secuenciales, alguien puede iterar). Activado: el agente pide email y verifica que coincide con el del pedido.</p>
+        <?php
+    }
+
+    public function render_openai_model_field() {
+        $value = get_option('ai_agent_openai_model', 'gpt-4o');
+        $models = array(
+            'gpt-4o'        => 'GPT-4o (recomendado, equilibrio)',
+            'gpt-4o-mini'   => 'GPT-4o mini (más barato)',
+            'gpt-4-turbo'   => 'GPT-4 Turbo',
+            'gpt-3.5-turbo' => 'GPT-3.5 Turbo (legacy)',
+        );
+        ?>
+        <select name="ai_agent_openai_model">
+            <?php foreach ($models as $k => $label) : ?>
+                <option value="<?php echo esc_attr($k); ?>" <?php selected($value, $k); ?>><?php echo esc_html($label); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <?php
+    }
+
+    public function render_anthropic_model_field() {
+        $value = get_option('ai_agent_anthropic_model', 'claude-sonnet-4-6');
+        $models = array(
+            'claude-sonnet-4-6'         => 'Claude Sonnet 4.6 (recomendado)',
+            'claude-opus-4-7'           => 'Claude Opus 4.7 (más capaz, más caro)',
+            'claude-haiku-4-5-20251001' => 'Claude Haiku 4.5 (rápido y barato)',
+        );
+        ?>
+        <select name="ai_agent_anthropic_model">
+            <?php foreach ($models as $k => $label) : ?>
+                <option value="<?php echo esc_attr($k); ?>" <?php selected($value, $k); ?>><?php echo esc_html($label); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <?php
+    }
+
+    private function render_provider_model_select($provider, $option_key) {
+        $providers = AI_Agent_LLM_Provider::get_openai_compatible_providers();
+        if (!isset($providers[$provider])) return;
+
+        $default = $providers[$provider]['default_model'];
+        $value = get_option($option_key, $default);
+        $models = $providers[$provider]['models'];
+        ?>
+        <select name="<?php echo esc_attr($option_key); ?>">
+            <?php foreach ($models as $k => $label) : ?>
+                <option value="<?php echo esc_attr($k); ?>" <?php selected($value, $k); ?>><?php echo esc_html($label); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <?php
+    }
+
+    public function render_deepseek_key_field() {
+        $value = get_option('ai_agent_deepseek_key', '');
+        echo '<input type="password" name="ai_agent_deepseek_key" value="' . esc_attr($value) . '" class="regular-text" placeholder="sk-..." />';
+        echo '<p class="description">Obtén tu key en <a href="https://platform.deepseek.com/api_keys" target="_blank">platform.deepseek.com</a>. También puedes definir <code>AI_AGENT_DEEPSEEK_KEY</code> en wp-config.php.</p>';
+    }
+
+    public function render_deepseek_model_field() {
+        $this->render_provider_model_select('deepseek', 'ai_agent_deepseek_model');
+    }
+
+    public function render_kimi_key_field() {
+        $value = get_option('ai_agent_kimi_key', '');
+        echo '<input type="password" name="ai_agent_kimi_key" value="' . esc_attr($value) . '" class="regular-text" placeholder="sk-..." />';
+        echo '<p class="description">Obtén tu key en <a href="https://platform.moonshot.ai" target="_blank">platform.moonshot.ai</a>. También puedes definir <code>AI_AGENT_KIMI_KEY</code> en wp-config.php.</p>';
+    }
+
+    public function render_kimi_model_field() {
+        $this->render_provider_model_select('kimi', 'ai_agent_kimi_model');
+    }
+
+    public function render_minimax_key_field() {
+        $value = get_option('ai_agent_minimax_key', '');
+        echo '<input type="password" name="ai_agent_minimax_key" value="' . esc_attr($value) . '" class="regular-text" placeholder="eyJ..." />';
+        echo '<p class="description">Obtén tu key en <a href="https://api.minimax.chat" target="_blank">api.minimax.chat</a>. También puedes definir <code>AI_AGENT_MINIMAX_KEY</code> en wp-config.php.</p>';
+    }
+
+    public function render_minimax_model_field() {
+        $this->render_provider_model_select('minimax', 'ai_agent_minimax_model');
+    }
+
+    public function render_streaming_enabled_field() {
+        $value = get_option('ai_agent_streaming_enabled', 'no');
+        ?>
+        <label><input type="checkbox" name="ai_agent_streaming_enabled" value="yes" <?php checked($value, 'yes'); ?> /> Activar streaming SSE (respuestas progresivas)</label>
+        <p class="description">Soportado por OpenAI, Anthropic, DeepSeek, Kimi y MiniMax. Requiere que tu servidor no bufferee la respuesta (nginx: <code>proxy_buffering off</code>).</p>
+        <?php
+    }
+
+    public function render_allowed_languages_field() {
+        $selected = (array) get_option('ai_agent_allowed_languages', array());
+        $languages = AI_Agent_Utils::get_supported_languages();
+        ?>
+        <fieldset>
+            <?php foreach ($languages as $code => $label) : ?>
+                <label style="display:inline-block; margin-right:16px; margin-bottom:6px;">
+                    <input type="checkbox" name="ai_agent_allowed_languages[]" value="<?php echo esc_attr($code); ?>" <?php checked(in_array($code, $selected, true), true); ?> />
+                    <?php echo esc_html($label); ?>
+                </label>
+            <?php endforeach; ?>
+        </fieldset>
+        <p class="description">
+            Idiomas en los que el agente puede responder. <strong>Si no marcas ninguno</strong>, responde en el idioma que detecte del usuario (sin restricción).
+            Si marcas varios y el usuario escribe en uno NO permitido, el agente le contestará en el idioma por defecto explicando qué idiomas atiende.
+        </p>
+        <?php
+    }
+
+    public function render_default_language_field() {
+        $value = get_option('ai_agent_default_language', '');
+        $languages = AI_Agent_Utils::get_supported_languages();
+        ?>
+        <select name="ai_agent_default_language">
+            <option value="" <?php selected($value, ''); ?>>— Detectar automáticamente —</option>
+            <?php foreach ($languages as $code => $label) : ?>
+                <option value="<?php echo esc_attr($code); ?>" <?php selected($value, $code); ?>><?php echo esc_html($label); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <p class="description">Idioma de respaldo cuando no se detecta el idioma del usuario o cuando el usuario escribe en un idioma no permitido.</p>
+        <?php
+    }
+
+    public function sanitize_languages($input) {
+        if (!is_array($input)) {
+            return array();
+        }
+        $allowed_codes = array_keys(AI_Agent_Utils::get_supported_languages());
+        return array_values(array_intersect($allowed_codes, array_map('sanitize_text_field', $input)));
     }
 
     public function render_greeting_primary_field() {

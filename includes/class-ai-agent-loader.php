@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 class AI_Agent_Loader {
     private $actions = array();
     private $filters = array();

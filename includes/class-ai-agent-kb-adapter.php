@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 interface AI_Agent_KB_Adapter_Interface {
     public function connect();
     public function disconnect();
@@ -284,8 +288,23 @@ class AI_Agent_KB_PostgreSQL extends AI_Agent_KB_Adapter {
         $dbname = $this->config['database'] ?? 'ai_agent';
         $user = $this->config['username'] ?? '';
         $password = $this->config['password'] ?? '';
+        $sslmode = $this->config['sslmode'] ?? 'require';
 
-        $conn_string = "host={$host} port={$port} dbname={$dbname} user={$user} password={$password}";
+        $params = array(
+            'host'     => $host,
+            'port'     => $port,
+            'dbname'   => $dbname,
+            'user'     => $user,
+            'password' => $password,
+            'sslmode'  => $sslmode,
+        );
+
+        $parts = array();
+        foreach ($params as $k => $v) {
+            $v = str_replace(array("\\", "'"), array("\\\\", "\\'"), (string) $v);
+            $parts[] = $k . "='" . $v . "'";
+        }
+        $conn_string = implode(' ', $parts);
 
         $this->connection = @pg_connect($conn_string);
 
@@ -332,15 +351,17 @@ class AI_Agent_KB_PostgreSQL extends AI_Agent_KB_Adapter {
             return array('error' => 'Failed to create embedding');
         }
 
-        $embedding_str = '[' . implode(',', $embedding) . ']';
+        $embedding_clean = array_map('floatval', $embedding);
+        $embedding_str = '[' . implode(',', $embedding_clean) . ']';
+        $top_k = max(1, min(100, intval($top_k)));
 
         $sql = "SELECT id, source_type, source_id, title, content, url,
-                1 - (embedding <=> '$embedding_str') as similarity
+                1 - (embedding <=> $1::vector) as similarity
                 FROM ai_agent_knowledge
-                ORDER BY embedding <=> '$embedding_str'
-                LIMIT $top_k";
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2";
 
-        $result = pg_query($this->connection, $sql);
+        $result = pg_query_params($this->connection, $sql, array($embedding_str, $top_k));
 
         if (!$result) {
             return array('error' => pg_last_error($this->connection));
@@ -369,17 +390,20 @@ class AI_Agent_KB_PostgreSQL extends AI_Agent_KB_Adapter {
             $this->connect();
         }
 
-        $embedding_str = '[' . implode(',', $embedding) . ']';
-        $title = pg_escape_string($metadata['title'] ?? '');
-        $content = pg_escape_string($metadata['text'] ?? '');
-        $url = pg_escape_string($metadata['url'] ?? '');
-        $source_type = pg_escape_string($metadata['source'] ?? 'wordpress');
+        $embedding_clean = array_map('floatval', $embedding);
+        $embedding_str = '[' . implode(',', $embedding_clean) . ']';
 
         $sql = "INSERT INTO ai_agent_knowledge (title, content, url, embedding, source_type)
-                VALUES ('$title', '$content', '$url', '$embedding_str', '$source_type')
+                VALUES ($1, $2, $3, $4::vector, $5)
                 ON CONFLICT DO NOTHING";
 
-        $result = pg_query($this->connection, $sql);
+        $result = pg_query_params($this->connection, $sql, array(
+            $metadata['title'] ?? '',
+            $metadata['text'] ?? '',
+            $metadata['url'] ?? '',
+            $embedding_str,
+            $metadata['source'] ?? 'wordpress',
+        ));
 
         return array('success' => $result !== false);
     }
@@ -389,9 +413,8 @@ class AI_Agent_KB_PostgreSQL extends AI_Agent_KB_Adapter {
             $this->connect();
         }
 
-        $id = intval($id);
-        $sql = "DELETE FROM ai_agent_knowledge WHERE id = $id";
-        $result = pg_query($this->connection, $sql);
+        $sql = "DELETE FROM ai_agent_knowledge WHERE id = $1";
+        $result = pg_query_params($this->connection, $sql, array(intval($id)));
 
         return array('success' => $result !== false);
     }

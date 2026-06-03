@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 class AI_Agent_Knowledge_Base {
     private $embedding_provider = 'openai';
     private $embeddings = array();
@@ -180,65 +184,89 @@ class AI_Agent_Knowledge_Base {
         return $context;
     }
 
+    /**
+     * Busca contexto relevante. Usa embeddings persistidos en knowledge_index;
+     * cae a búsqueda literal por LIKE si no hay índice todavía.
+     */
     public function find_relevant_context($query, $max_results = 5) {
-        $context = $this->build_context($query);
-        $query_embedding = $this->create_embeddings($query);
+        global $wpdb;
 
-        if (!$query_embedding) {
-            return array_slice($context, 0, $max_results);
+        $index_table = $wpdb->prefix . 'ai_agent_knowledge_index';
+
+        $indexed_count = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$index_table} WHERE is_active = 1 AND embedding IS NOT NULL"
+        );
+
+        if ($indexed_count === 0) {
+            return $this->fallback_keyword_search($query, $max_results);
         }
+
+        $query_embedding = $this->create_embeddings($query);
+        if (!$query_embedding) {
+            return $this->fallback_keyword_search($query, $max_results);
+        }
+
+        $rows = $wpdb->get_results(
+            "SELECT id, source_type, source_id, title, content, url, embedding
+             FROM {$index_table}
+             WHERE is_active = 1 AND embedding IS NOT NULL"
+        );
 
         $scored = array();
-        foreach ($context as $item) {
-            $content = $item['content'];
-            if (strlen($content) > 8000) {
-                $content = substr($content, 0, 8000);
+        foreach ($rows as $row) {
+            $emb = maybe_unserialize($row->embedding);
+            if (!is_array($emb)) {
+                continue;
             }
-            $item_embedding = $this->create_embeddings($content);
-            if ($item_embedding) {
-                $similarity = $this->cosine_similarity($query_embedding, $item_embedding);
-                $scored[] = array(
-                    'item' => $item,
-                    'score' => $similarity
-                );
-            } else {
-                $scored[] = array(
-                    'item' => $item,
-                    'score' => 0
-                );
-            }
+            $similarity = $this->cosine_similarity($query_embedding, $emb);
+            $scored[] = array(
+                'item' => array(
+                    'source'  => $row->source_type,
+                    'title'   => $row->title,
+                    'content' => $row->content,
+                    'url'     => $row->url,
+                ),
+                'score' => $similarity,
+            );
         }
 
-        usort($scored, function($a, $b) {
-            return $b['score'] - $a['score'];
+        usort($scored, function ($a, $b) {
+            return $b['score'] <=> $a['score'];
         });
 
         return array_slice($scored, 0, $max_results);
     }
 
+    private function fallback_keyword_search($query, $max_results = 5) {
+        global $wpdb;
+        $index_table = $wpdb->prefix . 'ai_agent_knowledge_index';
+
+        $like = '%' . $wpdb->esc_like(sanitize_text_field($query)) . '%';
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT source_type, title, content, url FROM {$index_table}
+             WHERE is_active = 1 AND (title LIKE %s OR content LIKE %s)
+             ORDER BY indexed_at DESC LIMIT %d",
+            $like, $like, $max_results
+        ));
+
+        $results = array();
+        foreach ($rows as $row) {
+            $results[] = array(
+                'item' => array(
+                    'source'  => $row->source_type,
+                    'title'   => $row->title,
+                    'content' => $row->content,
+                    'url'     => $row->url,
+                ),
+                'score' => 0,
+            );
+        }
+
+        return $results;
+    }
+
     private function cosine_similarity($a, $b) {
-        if (count($a) !== count($b)) {
-            return 0;
-        }
-
-        $dot_product = 0;
-        $norm_a = 0;
-        $norm_b = 0;
-
-        for ($i = 0; $i < count($a); $i++) {
-            $dot_product += $a[$i] * $b[$i];
-            $norm_a += $a[$i] * $a[$i];
-            $norm_b += $b[$i] * $b[$i];
-        }
-
-        $norm_a = sqrt($norm_a);
-        $norm_b = sqrt($norm_b);
-
-        if ($norm_a === 0 || $norm_b === 0) {
-            return 0;
-        }
-
-        return $dot_product / ($norm_a * $norm_b);
+        return AI_Agent_Utils::cosine_similarity($a, $b);
     }
 
     public function format_context_for_llm($relevant_context) {

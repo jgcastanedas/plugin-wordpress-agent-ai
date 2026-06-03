@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 class AI_Agent_Webhook {
     private $namespace = 'ai-agent/v1';
     private $rest_base = 'webhook';
@@ -14,33 +18,66 @@ class AI_Agent_Webhook {
         register_rest_route($this->namespace, '/webhook/test', array(
             'methods' => 'POST',
             'callback' => array($this, 'test_webhook'),
-            'permission_callback' => '__return_true',
+            'permission_callback' => array($this, 'verify_admin_or_nonce'),
         ));
+    }
+
+    public function verify_admin_or_nonce($request) {
+        if (current_user_can('manage_options')) {
+            return true;
+        }
+
+        $nonce = $request->get_header('x-wp-nonce');
+        if ($nonce && wp_verify_nonce($nonce, 'wp_rest')) {
+            return current_user_can('manage_options');
+        }
+
+        return new WP_Error(
+            'rest_forbidden',
+            __('Solo administradores pueden probar el webhook.', 'ai-agent-chatbot'),
+            array('status' => 403)
+        );
     }
 
     public function verify_webhook_signature($request) {
         $secret = AI_Agent_Settings::get_webhook_secret();
         if (empty($secret)) {
-            return true;
+            return new WP_Error(
+                'forbidden',
+                __('Webhook no configurado: falta el secret.', 'ai-agent-chatbot'),
+                array('status' => 503)
+            );
         }
 
-        $signature = $request->get_header('x-webhook-signature');
-        if (empty($signature)) {
-            $signature = $request->get_header('X-Webhook-Signature');
-        }
+        $body = $request->get_body();
 
-        if (empty($signature)) {
-            $body = $request->get_body();
-            $expected_sig = hash_hmac('sha256', $body, $secret);
-            $sig_from_body = isset($_SERVER['HTTP_X_WEBHOOK_SIGNATURE']) ? sanitize_text_field($_SERVER['HTTP_X_WEBHOOK_SIGNATURE']) : '';
-
-            if (empty($sig_from_body) || !hash_equals($expected_sig, $sig_from_body)) {
-                return new WP_Error(
-                    'forbidden',
-                    'Firma de webhook inválida',
-                    array('status' => 403)
-                );
+        $twilio_sig = $request->get_header('x_twilio_signature');
+        if (!empty($twilio_sig)) {
+            $auth_token = get_option('ai_agent_twilio_auth_token', $secret);
+            $url = home_url(add_query_arg(null, null));
+            if (self::verify_twilio_signature($body, $twilio_sig, $auth_token, $url)) {
+                return true;
             }
+            return new WP_Error('forbidden', 'Firma Twilio inválida', array('status' => 403));
+        }
+
+        $meta_sig = $request->get_header('x_hub_signature_256');
+        if (!empty($meta_sig)) {
+            $expected = 'sha256=' . hash_hmac('sha256', $body, $secret);
+            if (hash_equals($expected, $meta_sig)) {
+                return true;
+            }
+            return new WP_Error('forbidden', 'Firma Meta inválida', array('status' => 403));
+        }
+
+        $generic_sig = $request->get_header('x_webhook_signature');
+        if (empty($generic_sig)) {
+            return new WP_Error('forbidden', 'Falta firma del webhook', array('status' => 403));
+        }
+
+        $expected = hash_hmac('sha256', $body, $secret);
+        if (!hash_equals($expected, $generic_sig)) {
+            return new WP_Error('forbidden', 'Firma de webhook inválida', array('status' => 403));
         }
 
         return true;
@@ -49,12 +86,6 @@ class AI_Agent_Webhook {
     public function handle_webhook(WP_REST_Request $request) {
         $body = $request->get_json_params();
         $source = $this->detect_source($request);
-
-        $result = array(
-            'source' => $source,
-            'success' => false,
-            'response' => '',
-        );
 
         switch ($source) {
             case 'twilio':
@@ -69,7 +100,7 @@ class AI_Agent_Webhook {
         }
 
         $response = new WP_REST_Response($result, 200);
-        if (!$result['success']) {
+        if (empty($result['success'])) {
             $response->set_status(400);
         }
 
@@ -83,7 +114,7 @@ class AI_Agent_Webhook {
             return 'twilio';
         }
 
-        if (isset($headers['x_hub_signature']) || isset($headers['x-hub-signature'])) {
+        if (isset($headers['x_hub_signature']) || isset($headers['x-hub-signature']) || isset($headers['x_hub_signature_256'])) {
             return 'meta';
         }
 
@@ -111,7 +142,7 @@ class AI_Agent_Webhook {
             );
         }
 
-        $llm_response = $this->process_message($message);
+        $llm_response = $this->process_message($message, $from);
 
         $woocommerce = ai_agent_woocommerce();
         $llm_response = $woocommerce->replace_payment_links($llm_response);
@@ -134,10 +165,18 @@ class AI_Agent_Webhook {
 
             if (isset($value['messages'])) {
                 $message_data = $value['messages'][0];
-                $from = sanitize_text_field($message_data['from']);
-                $message_text = sanitize_textarea_field($message_data['text']['body']);
+                $from = sanitize_text_field($message_data['from'] ?? '');
+                $message_text = sanitize_textarea_field($message_data['text']['body'] ?? '');
 
-                $llm_response = $this->process_message($message_text);
+                if (empty($message_text)) {
+                    return array(
+                        'source' => 'meta',
+                        'success' => false,
+                        'response' => 'Mensaje vacío',
+                    );
+                }
+
+                $llm_response = $this->process_message($message_text, $from);
 
                 $woocommerce = ai_agent_woocommerce();
                 $llm_response = $woocommerce->replace_payment_links($llm_response);
@@ -165,17 +204,23 @@ class AI_Agent_Webhook {
         $message = '';
 
         if (is_array($body)) {
-            if (isset($body['message'])) {
-                $message = is_array($body['message']) ? json_encode($body['message']) : $body['message'];
-            } elseif (isset($body['text'])) {
-                $message = is_array($body['text']) ? json_encode($body['text']) : $body['text'];
-            } elseif (isset($body['content'])) {
-                $message = is_array($body['content']) ? json_encode($body['content']) : $body['content'];
-            } else {
-                $message = json_encode($body);
+            if (isset($body['message']) && is_string($body['message'])) {
+                $message = $body['message'];
+            } elseif (isset($body['text']) && is_string($body['text'])) {
+                $message = $body['text'];
+            } elseif (isset($body['content']) && is_string($body['content'])) {
+                $message = $body['content'];
             }
-        } else {
-            $message = sanitize_textarea_field($body);
+        }
+
+        $message = sanitize_textarea_field($message);
+
+        if (empty($message)) {
+            return array(
+                'source' => 'generic',
+                'success' => false,
+                'response' => 'No se recibió mensaje válido',
+            );
         }
 
         $llm_response = $this->process_message($message);
@@ -190,24 +235,19 @@ class AI_Agent_Webhook {
         );
     }
 
-    private function process_message($message) {
-        $knowledge_base = new AI_Agent_Knowledge_Base();
-        $llm = new AI_Agent_LLM_Provider();
-
-        $relevant_context = $knowledge_base->find_relevant_context($message, 5);
-        $context_text = $knowledge_base->format_context_for_llm($relevant_context);
-
-        $messages = array(
-            array('role' => 'user', 'content' => $message)
+    private function process_message($message, $phone = null) {
+        $agent = new AI_Agent_Agent();
+        $result = $agent->handle_message(
+            array('text' => $message, 'source' => $phone ? 'webhook' : 'generic'),
+            null,
+            $phone
         );
 
-        $response = $llm->chat($messages, $context_text);
-
-        if (is_wp_error($response)) {
-            return 'Lo siento, ocurrió un error al procesar tu mensaje. Por favor intenta de nuevo.';
+        if (empty($result['success'])) {
+            return $result['message'] ?? 'Lo siento, ocurrió un error al procesar tu mensaje.';
         }
 
-        return $response;
+        return $result['message'];
     }
 
     public function test_webhook(WP_REST_Request $request) {
@@ -215,13 +255,6 @@ class AI_Agent_Webhook {
         $test_message = isset($body['message']) ? sanitize_textarea_field($body['message']) : 'Hola, esto es un mensaje de prueba';
 
         $response = $this->process_message($test_message);
-
-        if (is_wp_error($response)) {
-            return new WP_REST_Response(array(
-                'success' => false,
-                'error' => $response->get_error_message(),
-            ), 400);
-        }
 
         return new WP_REST_Response(array(
             'success' => true,
@@ -234,8 +267,21 @@ class AI_Agent_Webhook {
         return rest_url('ai-agent/v1/webhook');
     }
 
-    public static function verify_twilio_signature($body, $signature, $auth_token) {
-        $expected = base64_encode(hash_hmac('sha1', $body, $auth_token, true));
+    public static function verify_twilio_signature($body, $signature, $auth_token, $url = '') {
+        if (empty($url)) {
+            $url = home_url(add_query_arg(null, null));
+        }
+
+        $data = $url;
+        if (is_string($body)) {
+            parse_str($body, $parsed);
+            ksort($parsed);
+            foreach ($parsed as $k => $v) {
+                $data .= $k . $v;
+            }
+        }
+
+        $expected = base64_encode(hash_hmac('sha1', $data, $auth_token, true));
         return hash_equals($expected, $signature);
     }
 }

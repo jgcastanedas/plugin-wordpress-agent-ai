@@ -3,7 +3,7 @@
  * Plugin Name: AI Agent Chatbot
  * Plugin URI: https://github.com/jgcastanedas/plugin-wordpress-agent-ai
  * Description: Widget de chatbot con IA para WordPress con integración WooCommerce, base de conocimiento vectorial, webhooks para WhatsApp, dashboard de métricas y comportamiento inteligente del agente
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Julian Castaneda
  * Author URI: https://jgcastanedas.com
  * License: GPL v2 or later
@@ -18,12 +18,13 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('AI_AGENT_VERSION', '1.0.0');
+define('AI_AGENT_VERSION', '1.1.0');
 define('AI_AGENT_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('AI_AGENT_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('AI_AGENT_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-loader.php';
+require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-utils.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-database.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-kb-adapter.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-session-cache.php';
@@ -32,7 +33,11 @@ require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-knowledge-base.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-scheduler.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-index.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-llm-provider.php';
+require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-stream.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-woocommerce.php';
+require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-wc-tools.php';
+require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-tool-audit.php';
+require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-privacy.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-webhook.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-widget.php';
 require_once AI_AGENT_PLUGIN_DIR . 'includes/class-ai-agent-agent.php';
@@ -56,6 +61,16 @@ class AI_Agent_Chatbot {
     private function init_components() {
         require_once AI_AGENT_PLUGIN_DIR . 'admin/class-ai-agent-admin.php';
         require_once AI_AGENT_PLUGIN_DIR . 'public/class-ai-agent-public.php';
+
+        if (is_admin()) {
+            new AI_Agent_Settings();
+            new AI_Agent_Admin();
+            new AI_Agent_Dashboard();
+            new AI_Agent_Tool_Audit_Admin();
+        }
+
+        new AI_Agent_Privacy();
+        new AI_Agent_Stream();
     }
 
     private function init_hooks() {
@@ -63,6 +78,7 @@ class AI_Agent_Chatbot {
         add_action('init', array($this, 'register_post_types'));
         add_action('rest_api_init', array($this, 'register_webhook_endpoints'));
         add_action('init', array($this, 'init_scheduler'));
+        add_action('init', array($this, 'handle_cart_redirect'));
     }
 
     public function init_scheduler() {
@@ -96,9 +112,45 @@ class AI_Agent_Chatbot {
         $webhook->register_routes();
     }
 
+    public function handle_cart_redirect() {
+        if (empty($_GET['ai_agent_cart']) || !class_exists('WooCommerce') || is_admin()) {
+            return;
+        }
+
+        $encoded = sanitize_text_field(wp_unslash($_GET['ai_agent_cart']));
+        $decoded = base64_decode($encoded, true);
+
+        if ($decoded === false) {
+            return;
+        }
+
+        $items = explode(',', $decoded);
+        foreach ($items as $item) {
+            if (!str_contains($item, ':')) {
+                continue;
+            }
+            list($product_id, $qty) = explode(':', $item, 2);
+            $product_id = absint($product_id);
+            $qty = max(1, min(100, absint($qty)));
+
+            if ($product_id > 0 && function_exists('wc_get_product')) {
+                $product = wc_get_product($product_id);
+                if ($product && $product->is_purchasable() && WC()->cart) {
+                    WC()->cart->add_to_cart($product_id, $qty);
+                }
+            }
+        }
+    }
+
     public function activate() {
         $db = AI_Agent_Database::get_instance();
         $db->create_tables();
+
+        AI_Agent_Tool_Audit::init_table();
+
+        if (!get_option('ai_agent_webhook_secret')) {
+            update_option('ai_agent_webhook_secret', wp_generate_password(32, false));
+        }
 
         $this->init_scheduler();
 

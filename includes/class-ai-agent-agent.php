@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 class AI_Agent_Agent {
     private $conversation;
     private $message;
@@ -39,12 +43,14 @@ class AI_Agent_Agent {
             return $this->format_response($offline_message, $conversation, 'offline');
         }
 
-        $context = $this->get_context_for_query($conversation, $input['text'] ?? $input['message']);
+        $user_text = $input['text'] ?? $input['message'];
 
-        $system_prompt = $this->build_system_prompt($conversation);
+        $context = $this->get_context_for_query($conversation, $user_text);
+
+        $system_prompt = $this->build_system_prompt($conversation, $user_text);
 
         $messages = $this->get_conversation_history($conversation->id, 5);
-        $messages[] = array('role' => 'user', 'content' => $input['text'] ?? $input['message']);
+        $messages[] = array('role' => 'user', 'content' => $user_text);
 
         $llm = new AI_Agent_LLM_Provider();
         $response = $llm->chat($messages, $system_prompt . "\n\nContext:\n" . $context);
@@ -465,7 +471,28 @@ class AI_Agent_Agent {
         );
     }
 
-    private function build_system_prompt($conversation) {
+    public static function detect_language($text) {
+        return AI_Agent_Utils::detect_language($text);
+    }
+
+    /**
+     * Devuelve los idiomas en los que el agente puede responder según Settings.
+     * Vacío = sin restricción (responde en el idioma detectado).
+     */
+    private function get_allowed_languages() {
+        $allowed = get_option('ai_agent_allowed_languages', array());
+        if (!is_array($allowed)) {
+            return array();
+        }
+        return array_values(array_filter(array_map('sanitize_text_field', $allowed)));
+    }
+
+    private function get_default_language() {
+        $default = get_option('ai_agent_default_language', '');
+        return $default ? sanitize_text_field($default) : null;
+    }
+
+    private function build_system_prompt($conversation, $user_message = '') {
         $role = $conversation->agent_role;
 
         $base_prompt = "Eres un asistente virtual inteligente. ";
@@ -484,20 +511,57 @@ class AI_Agent_Agent {
 
         $has_woocommerce = class_exists('WooCommerce');
         if ($has_woocommerce) {
-            $base_prompt .= "\n\nHay WooCommerce activo. Tienes acceso a información de productos, precios y puedes generar links de compra.";
+            $base_prompt .= "\n\nHay WooCommerce activo. Para INFORMACIÓN de productos (precios, descripciones, catálogo) usa el contexto que ya tienes — viene de la base de conocimiento. NO consultes la API para esto.";
+            $base_prompt .= "\n\nPara DATOS EN VIVO usa estos comandos especiales (el sistema los ejecutará y reemplazará por el resultado real):";
+            $base_prompt .= "\n- [ORDER_STATUS:123] — estado de un pedido por su número.";
+            $base_prompt .= "\n- [ORDER_STATUS:123:email@cliente.com] — estado verificado con email.";
+            $base_prompt .= "\n- [MY_ORDERS:email:user@x.com] — listar pedidos por email.";
+            $base_prompt .= "\n- [MY_ORDERS:phone:+34xxx] — listar pedidos por teléfono.";
+            $base_prompt .= "\n- [ADD_TO_CART:product_id:qty] — añadir al carrito (solo si role es vendor).";
+            $base_prompt .= "\n- [BUY_NOW:product_id] — comprar ya (solo si role es vendor).";
+            $base_prompt .= "\n- [CREATE_CUSTOMER:{\"email\":\"x@y.com\",\"first_name\":\"Juan\",\"last_name\":\"Pérez\",\"phone\":\"+34...\",\"address_1\":\"...\",\"city\":\"...\",\"postcode\":\"...\",\"country\":\"ES\"}] — crear cliente. PIDE todos los datos antes de emitir el tag.";
+            $base_prompt .= "\n\nNUNCA inventes datos de pedidos. Si el usuario pregunta por un pedido y no tienes el número, pídeselo.";
         }
 
-        $hour = (int) date('H');
         $within_hours = $this->is_within_business_hours();
 
         if (!$within_hours) {
             $base_prompt .= "\n\nIMPORTANTE: Actualmente el negocio está cerrado. Si el usuario pregunta sobre atención o horarios, indícalo claramente.";
         }
 
+        $allowed = $this->get_allowed_languages();
+        $default = $this->get_default_language();
+
+        $response_lang = null;
+
+        if (!empty($user_message)) {
+            $detected = AI_Agent_Utils::detect_language($user_message, $allowed ?: null);
+
+            if ($detected) {
+                $response_lang = $detected;
+            } elseif (!empty($allowed)) {
+                $response_lang = $default && in_array($default, $allowed, true) ? $default : $allowed[0];
+            } elseif ($default) {
+                $response_lang = $default;
+            }
+        }
+
+        if ($response_lang) {
+            $name = AI_Agent_Utils::get_language_name($response_lang);
+            $base_prompt .= "\n\nResponde SIEMPRE en " . $name . ", aunque el contexto venga en otro idioma.";
+        }
+
+        if (!empty($allowed) && count($allowed) >= 1) {
+            $allowed_names = array_map(array('AI_Agent_Utils', 'get_language_name'), $allowed);
+            $base_prompt .= "\nSolo puedes responder en: " . implode(', ', $allowed_names) . ". Si el usuario escribe en otro idioma, responde en " . AI_Agent_Utils::get_language_name($response_lang ?? $allowed[0]) . " explicando amablemente cuáles idiomas atiendes.";
+        }
+
         return $base_prompt;
     }
 
     private function process_response($response, $conversation, $intent) {
+        $response = $this->handle_wc_tools($response, $conversation);
+
         $response = $this->handle_cart_commands($response, $conversation, $intent);
 
         $response = $this->handle_discount_codes($response);
@@ -505,32 +569,111 @@ class AI_Agent_Agent {
         return $response;
     }
 
+    private function handle_wc_tools($response, $conversation) {
+        if (!function_exists('ai_agent_wc_tools')) {
+            return $response;
+        }
+
+        $tools = ai_agent_wc_tools();
+        if (!$tools->is_active()) {
+            return $response;
+        }
+
+        $context = array(
+            'phone'   => $conversation->phone,
+            'user_id' => get_current_user_id(),
+        );
+
+        $response = preg_replace_callback(
+            '/\[ORDER_STATUS:(\d+)(?::([^\]\s]+))?\]/',
+            function ($m) use ($tools, $context, $conversation) {
+                $order_id = (int) $m[1];
+                $email = isset($m[2]) ? sanitize_email($m[2]) : null;
+                $result = $tools->get_order_status($order_id, $email, $context);
+                AI_Agent_Tool_Audit::log('order_status', array('order_id' => $order_id, 'email' => $email), $result, $conversation);
+                return $result['message'];
+            },
+            $response
+        );
+
+        $response = preg_replace_callback(
+            '/\[MY_ORDERS:(email|phone):([^\]\s]+)\]/',
+            function ($m) use ($tools, $conversation) {
+                $type = $m[1];
+                $value = $m[2];
+                if ($type === 'email') {
+                    $value = sanitize_email($value);
+                } else {
+                    $value = sanitize_text_field($value);
+                }
+                $result = $tools->get_my_orders($type, $value, 5);
+                AI_Agent_Tool_Audit::log('my_orders', array('type' => $type, 'value' => $value), $result, $conversation);
+                return $result['message'];
+            },
+            $response
+        );
+
+        $response = preg_replace_callback(
+            '/\[CREATE_CUSTOMER:(\{.+?\})\]/s',
+            function ($m) use ($tools, $conversation) {
+                $data = json_decode($m[1], true);
+                if (!is_array($data)) {
+                    AI_Agent_Tool_Audit::log('create_customer', array('raw' => substr($m[1], 0, 200)), array('success' => false, 'message' => 'JSON inválido'), $conversation);
+                    return '⚠️ No pude leer los datos del cliente.';
+                }
+                $result = $tools->create_customer($data);
+                AI_Agent_Tool_Audit::log('create_customer', $data, $result, $conversation);
+                return $result['message'];
+            },
+            $response
+        );
+
+        return $response;
+    }
+
     private function handle_cart_commands($response, $conversation, $intent) {
+        $allow_checkout = get_option('ai_agent_allow_checkout', 'yes') === 'yes';
+        $is_vendor = ($conversation->agent_role === 'vendor' || $conversation->agent_role === 'both');
+
         if (preg_match_all('/\[ADD_TO_CART:(\d+):(\d+)\]/', $response, $matches)) {
             foreach ($matches[1] as $index => $product_id) {
-                $quantity = isset($matches[2][$index]) ? $matches[2][$index] : 1;
+                $product_id = absint($product_id);
+                $quantity = isset($matches[2][$index]) ? absint($matches[2][$index]) : 1;
+                $quantity = max(1, min(100, $quantity));
 
-                if ($conversation->agent_role !== 'vendor') {
+                $tag = "[ADD_TO_CART:{$product_id}:{$quantity}]";
+
+                if (!$is_vendor || !$allow_checkout || !class_exists('WooCommerce')) {
+                    $response = str_replace($tag, '', $response);
+                    continue;
+                }
+
+                $product = wc_get_product($product_id);
+                if (!$product || !$product->is_purchasable() || $product->get_status() !== 'publish') {
+                    $response = str_replace($tag, '', $response);
                     continue;
                 }
 
                 $this->cart->add_item($conversation->id, $product_id, $quantity);
 
-                $product = wc_get_product($product_id);
-                if ($product) {
-                    $response = str_replace(
-                        "[ADD_TO_CART:{$product_id}:{$quantity}]",
-                        "",
-                        $response
-                    );
-                    $response .= "\n\n✅ *Producto agregado al carrito:* {$product->get_name()}";
-                }
+                $response = str_replace($tag, '', $response);
+                $response .= "\n\n✅ *Producto agregado al carrito:* " . esc_html($product->get_name());
             }
         }
 
         if (preg_match_all('/\[BUY_NOW:(\d+)\]/', $response, $matches)) {
             foreach ($matches[1] as $product_id) {
-                if ($conversation->agent_role !== 'vendor') {
+                $product_id = absint($product_id);
+                $tag = "[BUY_NOW:{$product_id}]";
+
+                if (!$is_vendor || !$allow_checkout || !class_exists('WooCommerce')) {
+                    $response = str_replace($tag, '', $response);
+                    continue;
+                }
+
+                $product = wc_get_product($product_id);
+                if (!$product || !$product->is_purchasable() || $product->get_status() !== 'publish') {
+                    $response = str_replace($tag, '', $response);
                     continue;
                 }
 
@@ -539,8 +682,8 @@ class AI_Agent_Agent {
                 $checkout_url = $this->cart->get_checkout_url($conversation->id);
 
                 $response = str_replace(
-                    "[BUY_NOW:{$product_id}]",
-                    "\n\n👉 [Proceder al pago]({$checkout_url})",
+                    $tag,
+                    "\n\n👉 [Proceder al pago](" . esc_url($checkout_url) . ")",
                     $response
                 );
             }

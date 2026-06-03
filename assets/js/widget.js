@@ -9,6 +9,7 @@
         input: null,
         sendButton: null,
         isOpen: false,
+        sessionId: null,
 
         init: function() {
             this.container = $('#ai-agent-chat-container');
@@ -19,6 +20,12 @@
             this.sendButton = $('#ai-agent-send-message');
 
             if (this.container.length === 0) return;
+
+            try {
+                this.sessionId = window.sessionStorage.getItem('ai_agent_session_id');
+            } catch (e) {
+                this.sessionId = null;
+            }
 
             this.bindEvents();
         },
@@ -70,10 +77,16 @@
             this.input.val('');
             this.setTyping(true);
 
+            if (aiAgentWidget.streaming && typeof window.EventSource !== 'undefined') {
+                this.sendMessageStream(message);
+                return;
+            }
+
             const data = {
                 action: 'ai_agent_chat',
                 nonce: aiAgentWidget.nonce,
-                message: message
+                message: message,
+                session_id: this.sessionId || ''
             };
 
             $.ajax({
@@ -84,16 +97,84 @@
                     this.setTyping(false);
 
                     if (response.success && response.data.response) {
+                        if (response.data.session_id) {
+                            this.sessionId = response.data.session_id;
+                            try {
+                                window.sessionStorage.setItem('ai_agent_session_id', this.sessionId);
+                            } catch (e) {}
+                        }
                         this.addMessage(response.data.response, 'bot');
                     } else {
-                        this.addMessage('Lo siento, ocurrió un error. Por favor intenta de nuevo.', 'bot');
+                        const errMsg = (response.data && response.data.error)
+                            ? response.data.error
+                            : 'Lo siento, ocurrió un error. Por favor intenta de nuevo.';
+                        this.addMessage(errMsg, 'bot');
                     }
                 }.bind(this),
-                error: function() {
+                error: function(xhr) {
                     this.setTyping(false);
-                    this.addMessage('Lo siento, no pude procesar tu mensaje. Verifica tu conexión.', 'bot');
+                    if (xhr && xhr.status === 429) {
+                        this.addMessage('Demasiadas solicitudes. Espera un momento.', 'bot');
+                    } else {
+                        this.addMessage('Lo siento, no pude procesar tu mensaje. Verifica tu conexión.', 'bot');
+                    }
                 }.bind(this)
             });
+        },
+
+        sendMessageStream: function(message) {
+            const params = new URLSearchParams({
+                action: 'ai_agent_stream',
+                nonce: aiAgentWidget.nonce,
+                message: message,
+                session_id: this.sessionId || ''
+            });
+
+            const url = aiAgentWidget.ajaxUrl + '?' + params.toString();
+            const es = new EventSource(url);
+
+            let currentBubble = null;
+            let accumulated = '';
+
+            es.addEventListener('chunk', function(e) {
+                this.setTyping(false);
+                const data = JSON.parse(e.data);
+                accumulated += data.text;
+
+                if (!currentBubble) {
+                    currentBubble = this.appendEmptyBotMessage();
+                }
+                currentBubble.textContent = accumulated;
+                this.scrollToBottom();
+            }.bind(this));
+
+            es.addEventListener('done', function(e) {
+                const data = JSON.parse(e.data);
+                if (data.session_id && !this.sessionId) {
+                    this.sessionId = data.session_id;
+                    try { window.sessionStorage.setItem('ai_agent_session_id', this.sessionId); } catch (err) {}
+                }
+                es.close();
+            }.bind(this));
+
+            es.addEventListener('error', function(e) {
+                this.setTyping(false);
+                es.close();
+                if (!accumulated) {
+                    this.addMessage('Lo siento, no pude procesar tu mensaje. Verifica tu conexión.', 'bot');
+                }
+            }.bind(this));
+        },
+
+        appendEmptyBotMessage: function() {
+            const wrap = document.createElement('div');
+            wrap.className = 'ai-agent-message ai-agent-message-bot';
+            const content = document.createElement('div');
+            content.className = 'ai-agent-message-content';
+            wrap.appendChild(content);
+            this.messagesContainer[0].appendChild(wrap);
+            this.scrollToBottom();
+            return content;
         },
 
         addMessage: function(content, type) {

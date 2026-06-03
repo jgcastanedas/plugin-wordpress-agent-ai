@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 class AI_Agent_Widget {
     private static $instance = null;
 
@@ -41,10 +45,15 @@ class AI_Agent_Widget {
             true
         );
 
+        $streaming_enabled = get_option('ai_agent_streaming_enabled', 'no') === 'yes';
+        $provider = get_option('ai_agent_llm_provider', 'openai');
+        $streaming_supported = in_array($provider, array('openai', 'anthropic', 'deepseek', 'kimi', 'minimax'), true);
+
         wp_localize_script('ai-agent-widget', 'aiAgentWidget', array(
             'ajaxUrl' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('ai_agent_nonce'),
             'webhookUrl' => AI_Agent_Settings::get_webhook_url(),
+            'streaming' => $streaming_enabled && $streaming_supported,
             'config' => $config,
             'i18n' => array(
                 'welcome' => $config['welcome_message'],
@@ -358,41 +367,6 @@ class AI_Agent_Widget {
         <?php
     }
 
-    public function ajax_handle_message() {
-        check_ajax_referer('ai_agent_nonce', 'nonce');
-
-        $message = isset($_POST['message']) ? sanitize_textarea_field($_POST['message']) : '';
-
-        if (empty($message)) {
-            wp_send_json_error(array('message' => 'No se recibió mensaje'));
-        }
-
-        $knowledge_base = new AI_Agent_Knowledge_Base();
-        $llm = new AI_Agent_LLM_Provider();
-
-        $relevant_context = $knowledge_base->find_relevant_context($message, 5);
-        $context_text = $knowledge_base->format_context_for_llm($relevant_context);
-
-        $messages = array(
-            array('role' => 'user', 'content' => $message)
-        );
-
-        $response = $llm->chat($messages, $context_text);
-
-        if (is_wp_error($response)) {
-            wp_send_json_error(array('message' => $response->get_error_message()));
-        }
-
-        $woocommerce = ai_agent_woocommerce();
-        $response = $woocommerce->replace_payment_links($response);
-
-        wp_send_json_success(array('response' => $response));
-    }
-
-    public function register_ajax_handlers() {
-        add_action('wp_ajax_ai_agent_chat', array($this, 'ajax_handle_message'));
-        add_action('wp_ajax_nopriv_ai_agent_chat', array($this, 'ajax_handle_message'));
-    }
 }
 
 function ai_agent_widget() {
@@ -400,5 +374,3 @@ function ai_agent_widget() {
 }
 
 add_action('init', array('AI_Agent_Widget', 'get_instance'));
-add_action('wp_ajax_ai_agent_chat', array('AI_Agent_Widget', 'ajax_handle_message'));
-add_action('wp_ajax_nopriv_ai_agent_chat', array('AI_Agent_Widget', 'ajax_handle_message'));

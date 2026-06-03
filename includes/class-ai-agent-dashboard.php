@@ -1,5 +1,9 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 class AI_Agent_Dashboard {
     public function __construct() {
         add_action('admin_menu', array($this, 'add_dashboard_menu'));

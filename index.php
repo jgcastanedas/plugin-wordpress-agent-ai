@@ -1,9 +1,8 @@
 <?php
 /**
- * Plugin Name: AI Agent Chatbot
+ * Silence is golden.
  *
  * @package AI_Agent
- * @wordpress-plugin
  */
 
 if (!defined('ABSPATH')) {

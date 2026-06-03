@@ -1,5 +1,10 @@
 <?php
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+
 class AI_Agent_WooCommerce {
     private static $instance = null;
 
