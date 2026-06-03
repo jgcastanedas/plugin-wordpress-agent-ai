@@ -8,215 +8,181 @@ AI Agent Chatbot es un plugin de WordPress que permite crear un asistente virtua
 
 El agente tiene comportamiento inteligente con roles configurables (asesor/vendedor), horarios de atención personalizados, campañas de descuento y carrito de compras integrado.
 
+---
+
 ## Características
 
 ### 🤖 Inteligencia Artificial y Agente Inteligente
 
 - **Selección de LLM**: Soporta OpenAI (GPT-4o, GPT-4 Turbo, GPT-3.5), Anthropic (Claude 3.5 Sonnet, Claude 3 Opus), y Ollama (local)
 - **Base de conocimiento vectorial**: Selecciona páginas específicas de tu sitio para entrenar al agente
-- **Embeddings optimizados**: Conversión de contenido a vectores usando OpenAI embeddings o TF-IDF local
-- **Documentos personalizados**: Crea documentos de conocimiento adicionales desde el admin
-- **Scheduler automático**: Indexación horaria automática para mantener la base de conocimiento actualizada
-- **Límites de tokens configurables**: Control del contexto para optimizar costos
+- **Base de conocimiento externa**: Conexión a Pinecone, PostgreSQL + pgvector, o Supabase
 - **Session Cache**: Respuestas rápidas con caché de contexto por sesión
+- **Límites de tokens configurables**: Control del contexto para optimizar costos
 
 ### 🎭 Comportamiento del Agente
 
-- **Roles configurables**:
-  - **Asesor**: Responde preguntas, da información, ayuda con dudas
-  - **Vendedor**: Puede agregar productos al carrito y generar links de pago
-  - **Ambos**: Combina asesoría y venta
-- **Saludos personalizados**: Configura mensajes de saludo según hora del día
+- **Roles configurables**: Asesor, Vendedor, o Ambos
 - **Horarios de atención**: Define días y horas de atención automática
-- **Mensaje fuera de horario**: Respuesta automática cuando el negocio está cerrado
 - **Campañas y promociones**: Mensajes personalizados con códigos de descuento
-- **Validación de códigos**: Detecta y valida códigos de descuento en la conversación
-- **Detección de intención**: greeting, purchase, price_inquiry, discount, product_browse, view_cart, checkout, business_hours, general
-
-### 🗄️ Base de Conocimiento Externa
-
-El plugin soporta conexión a servicios externos de base de conocimiento vectorial:
-
-- **Pinecone**: Vector database cloud
-- **PostgreSQL + pgvector**: Tu propio servidor con extensión vectorial
-- **Supabase**: PostgreSQL managed con REST API
-- **Custom API**: Cualquier endpoint que siga el protocolo del plugin
-
-**Beneficios**:
-- Compartida entre múltiples sitios WordPress
-- Mejor rendimiento para grandes volúmenes de datos
-- Búsqueda semántica más precisa
-- Caché de sesión para respuestas rápidas
+- **Detección de intención**: greeting, purchase, price_inquiry, discount, etc.
 
 ### 🛒 WooCommerce Integration
 
 - **Fichas de productos optimizadas**: Descripciones comprimidas para reducir tokens
-- **Información automática**: Nombre, precio, SKU, categorías, descripción corta
 - **Generación de links de pago**: Carrito y checkout integrados en la conversación
 - **Carrito persistente por sesión**: El carrito se mantiene durante la conversación
-- **Búsqueda semántica de productos**: Encuentra productos por nombre o descripción
 
 ### 📱 Integraciones de Mensajería
 
-- **Webhook REST**: Endpoint `/wp-json/ai-agent/v1/webhook` para integraciones externas
-- **Twilio WhatsApp**: Recibir y responder mensajes de WhatsApp vía Twilio
-- **Meta WhatsApp Business**: Integración con la API de WhatsApp Business de Meta
-- **Generic Webhook**: Compatible con cualquier servicio que envíe webhooks POST
-- **Identificación por sesión y teléfono**: Rastreo de conversaciones por session_id y phone number
+- **Webhook REST**: Endpoint para integraciones con WhatsApp, Twilio y Meta
+- **Identificación por sesión y teléfono**: Rastreo de conversaciones por session_id y phone
 
 ### 📊 Dashboard y Métricas
 
-- **Dashboard administrativo**: Vista general con estadísticas en tiempo real
+- **Dashboard administrativo**: Estadísticas en tiempo real
 - **Métricas diarias**: Conversaciones, mensajes, tokens y costos por día
-- **Consumo por modelo LLM**: Desglose de uso por modelo (GPT-4, Claude, Ollama)
-- **Gráficos de comportamiento**: Visualización de tendencias de uso (Chart.js)
-- **Historial de conversaciones**: Registro completo de mensajes con contexto
-- **Costo en dólares**: Estimación de costos basada en pricing de OpenAI/Anthropic
+- **Consumo por modelo LLM**: Desglose de uso por modelo
+- **Costo en dólares**: Estimación de costos basada en pricing
 
-### 🎨 Personalización del Widget
+---
 
-- **Logo**: Icono predeterminado, icono del sitio, o logo personalizado
-- **Colores**: Personalización completa de todos los elementos (header, botones, burbujas, texto)
-- **Tipografía**: Familia de fuente y tamaño configurable
-- **Dimensiones**: Ancho, alto, border radius, tamaño del botón, espaciado
-- **Posición**: 4 posiciones disponibles (esquinas inferiores o superiores)
-- **Mensajes**: Título del header, mensaje de bienvenida, placeholder del input
+## Guía de Instalación y Configuración
 
-## Arquitectura
+### Paso 1: Instalación
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     AI AGENT PLUGIN                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │   ADMIN     │  │   PUBLIC    │  │     WEBHOOK         │ │
-│  │  Settings   │  │   Widget    │  │  Twilio/Meta/Other  │ │
-│  │  Dashboard  │  │   Frontend  │  │                     │ │
-│  │  Knowledge  │  │             │  │                     │ │
-│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘ │
-│         │                │                    │             │
-│  ┌──────┴────────────────┴────────────────────┴──────────┐  │
-│  │                      AGENT                          │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐ │  │
-│  │  │ Intent   │ │ Context  │ │  Cart    │ │Campaign│ │  │
-│  │  │ Detection│ │ Builder  │ │ Manager  │ │ Handler│ │  │
-│  │  └──────────┘ └──────────┘ └──────────┘ └────────┘ │  │
-│  └─────────────────────────┬──────────────────────────┘  │
-│                            │                              │
-│  ┌─────────────────────────┼─────────────────────────────┐ │
-│  │                 SESSION CACHE                        │ │
-│  │  ┌────────────────────────────────────────────────┐   │ │
-│  │  │  Session_{id} = {context, tokens, last_access} │   │ │
-│  │  └────────────────────────────────────────────────┘   │ │
-│  └─────────────────────────┬─────────────────────────────┘ │
-│                            │                              │
-│  ┌─────────────────────────┴──────────────────────────┐  │
-│  │                 KNOWLEDGE BASE                     │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌────────────┐  │  │
-│  │  │   Local     │  │  External   │  │  Products │  │  │
-│  │  │  (MySQL)    │  │  (Pinecone  │  │  (WC)     │  │  │
-│  │  │             │  │   PG/Supa) │  │           │  │  │
-│  │  └─────────────┘  └─────────────┘  └────────────┘  │  │
-│  └────────────────────────────────────────────────────┘  │
-│                            │                              │
-│  ┌─────────────────────────┴──────────────────────────┐  │
-│  │                    LLM PROVIDER                    │  │
-│  │       OpenAI  /  Anthropic  /  Ollama            │  │
-│  └────────────────────────────────────────────────────┘  │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
+1. Descarga el plugin desde GitHub o clona el repositorio
+2. Copia la carpeta a `/wp-content/plugins/` de tu WordPress
+3. Activa el plugin desde **Plugins > Plugins instalados**
+4. Verás un nuevo menú **"AI Agent"** en el sidebar de WordPress
 
-## Requisitos
+### Paso 2: Configurar LLM
 
-- WordPress 6.0 o superior
-- PHP 8.1 o superior
-- WooCommerce (opcional, para integración de productos)
-- API Key de OpenAI o Anthropic (opcional, para uso con sus servicios)
+1. Ve a **AI Agent > Configuración**
+2. En la sección **"LLM"**:
+   - Selecciona tu proveedor: **OpenAI**, **Anthropic**, u **Ollama**
+   - Ingresa tu API Key correspondiente
+   - Para Ollama, ingresa la URL (por defecto `http://localhost:11434`) y el modelo
 
-## Instalación
+### Paso 3: Configurar Base de Conocimiento
 
-1. Descarga el plugin o clona el repositorio en `/wp-content/plugins/`
-2. Activa el plugin desde el menú de Plugins de WordPress
-3. Ve a **AI Agent** en el menú lateral de WordPress
-4. Configura tu proveedor de LLM y agrega las API keys necesarias
-5. Selecciona las páginas para la base de conocimiento
-6. Configura el comportamiento del agente (rol, horarios, campañas)
-7. **Opcional**: Configura conexión a base de conocimiento externa (Pinecone, PostgreSQL, Supabase)
-8. Personaliza la apariencia del widget
-9. Activa el widget desde la configuración
+#### 3.1. Selección de Páginas
 
-## Configuración de Base de Conocimiento Externa
+1. En **AI Agent > Configuración**, sección **"Base de Conocimiento"**
+2. Mantén presionado **Ctrl/Cmd** y selecciona las páginas que quieres incluir
+3. Las páginas seleccionadas se usarán como contexto para el agente
 
-### Pinecone
-1. Crea una cuenta en [Pinecone](https://www.pinecone.io/)
-2. Crea un proyecto y obtén el API URL y API Key
-3. En el plugin, selecciona "Pinecone" como tipo de servicio
-4. Ingresa el endpoint y API Key
-5. Prueba la conexión
+#### 3.2. Documentos Personalizados
 
-### PostgreSQL + pgvector
-1. Instala PostgreSQL con la extensión pgvector
-2. Crea una tabla para el knowledge base (el plugin lo hace automáticamente)
-3. Selecciona "PostgreSQL + pgvector" como tipo de servicio
-4. Ingresa la conexión: `host:port/database`
+1. Ve a **AI Agent > Documentos** (en el menú lateral)
+2. Clic en **"Agregar nuevo"**
+3. Escribe el título y contenido del documento
+4. Publica - el contenido se indexará automáticamente
 
-### Supabase
-1. Crea un proyecto en [Supabase](https://supabase.com/)
-2. Obtén el API Key y Project ID
-3. Crea una tabla llamada `ai_agent_knowledge` con columnas:
-   - `id` (text, primary key)
-   - `title` (text)
-   - `content` (text)
-   - `embedding` (text, para vectores en base64)
-4. Selecciona "Supabase" como tipo de servicio
+#### 3.3. Límites de Tokens
 
-### Configuración de Sync
-- **Sincronización automática**: El plugin puede sincronizar contenido periódicamente
-- **Intervalo configurable**: Cada 15 min a diario
-- **Fallback local**: Si el servicio externo falla, usa la base local
-
-## Configuración
-
-### Configuración de LLM
-
-| Proveedor | Modelos | Notas |
-|-----------|---------|-------|
-| OpenAI | GPT-4o, GPT-4 Turbo, GPT-3.5 | Requiere API key de OpenAI |
-| Anthropic | Claude 3.5 Sonnet, Claude 3 Opus | Requiere API key de Anthropic |
-| Ollama | Llama 3, Mistral, Codellama, etc. | Funciona localmente, no requiere API key |
-
-### Base de Conocimiento
-
-#### Selección de Páginas
-1. Ve a **AI Agent > Configuración > Base de Conocimiento**
-2. Selecciona las páginas que quieres incluir
-3. Usa Ctrl/Cmd + click para selección múltiple
-
-#### Documentos Personalizados
-1. Ve a **AI Agent > Documentos**
-2. Crea un nuevo documento de tipo `ai_agent_knowledge`
-3. Agrega el contenido que quieras usar como contexto adicional
-
-#### Límites de Tokens
-- **Límite para Warning**: Avisa cuando el contexto se acerque a este límite
+En la misma sección de Base de Conocimiento:
+- **Límite para Warning**: Tokens antes de mostrar advertencia
 - **Máximo Tokens en Contexto**: Control del contexto máximo enviado al LLM
 
-### Comportamiento del Agente
+### Paso 4: Configurar Base de Conocimiento Externa (Opcional)
+
+Si quieres usar un servicio externo de búsqueda vectorial:
+
+#### 4.1. Pinecone
+
+1. Crea una cuenta en [pinecone.io](https://www.pinecone.io/)
+2. Crea un proyecto nuevo
+3. Copia el **API URL** y **API Key**
+4. En el plugin, ve a **AI Agent > Configuración > Base de Conocimiento Externa**
+5. Selecciona **"Pinecone"** como tipo de servicio
+6. Ingresa el endpoint y API Key
+7. Clic en **"Probar Conexión"**
+
+#### 4.2. PostgreSQL + pgvector
+
+1. Instala PostgreSQL con la extensión pgvector en tu servidor
+2. Asegúrate de que PHP tenga la extensión `pg` habilitada
+3. En el plugin, selecciona **"PostgreSQL + pgvector"**
+4. Ingresa la conexión: `host:port/database`
+5. Ejemplo: `postgres.example.com:5432/mydb`
+6. Ingresa usuario y contraseña
+7. Prueba la conexión
+
+#### 4.3. Supabase
+
+1. Crea un proyecto en [supabase.com](https://supabase.com/)
+2. Ve a **Settings > API** y copia:
+   - **Project ID**
+   - **API Key** (anon/public)
+3. En el plugin, selecciona **"Supabase"**
+4. Ingresa el Project ID y API Key
+5. Crea una tabla en Supabase llamada `ai_agent_knowledge` con este SQL:
+
+```sql
+CREATE TABLE ai_agent_knowledge (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    url TEXT,
+    embedding TEXT,
+    source_type TEXT DEFAULT 'wordpress',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Función para buscar vectores (necesitarás crear una función RPC en Supabase)
+CREATE FUNCTION match_knowledge(query_embedding TEXT, match_threshold FLOAT, match_count INT)
+RETURNS TABLE(id INT, title TEXT, content TEXT, url TEXT, similarity FLOAT) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    a.id::INT,
+    a.title,
+    a.content,
+    a.url,
+    1 - (a.embedding <=> query_embedding::vector) as similarity
+  FROM ai_agent_knowledge a
+  WHERE 1 - (a.embedding <=> query_embedding::vector) > match_threshold
+  ORDER BY a.embedding <=> query_embedding::vector
+  LIMIT match_count;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### 4.4. Configurar Sincronización
+
+- **Sincronización automática**: Activa para sincronizar contenido periódicamente
+- **Intervalo**: Cada 15 min, 30 min, 1 hora, 3 horas, 6 horas, 12 horas, o diario
+- **Fallback a local**: Si el servicio externo falla, usa la base de conocimiento local de WordPress
+
+### Paso 5: Configurar Comportamiento del Agente
+
+En **AI Agent > Configuración > Comportamiento del Agente**:
 
 #### Rol del Agente
 - **Asesor**: Responde preguntas, da información
 - **Vendedor**: Agrega productos al carrito y genera links de pago
 - **Ambos**: Combina ambas capacidades
 
-#### Horarios de Atención
-1. Activa "Horarios de Atención"
-2. Configura los días y horarios activos
-3. Personaliza el mensaje que se muestra fuera de horario
+#### Mensajes Personalizados
+- **Mensaje de Saludo**: Configura el saludo inicial del bot
+- **Mensaje Fuera de Horario**: Lo que recibirá el usuario fuera de horarios de atención
 
-#### Campañas y Promociones
-Formato JSON para campañas:
+### Paso 6: Configurar Horarios de Atención
+
+1. En **AI Agent > Configuración > Horarios de Atención**
+2. Activa la opción **"Activar Horarios"**
+3. Configura cada día:
+   - Activa el día
+   - Define hora de inicio y fin
+4. En **"Texto para Mostrar Horario"**, escribe cómo quieres que se muestre el horario al usuario
+   - Ejemplo: `Lunes a Viernes 9:00-18:00`
+
+### Paso 7: Configurar Campañas
+
+1. En **AI Agent > Configuración > Campañas y Promociones**
+2. Agrega campañas en formato JSON:
+
 ```json
 [
   {
@@ -231,82 +197,130 @@ Formato JSON para campañas:
 ]
 ```
 
-### Personalización del Widget
+### Paso 8: Personalizar Widget
 
-#### Colores Disponibles
-- **Color Primario**: Header, indicador de escritura, enfoque en input
+En **AI Agent > Configuración > Apariencia del Widget**:
+
+- **Activar Widget**: Habilita el chat en el frontend
+- **Posición**: Elige dónde aparece el botón (esquinas)
+- **Logo**: Predeterminado, icono del sitio, o personalizado
+- **Título del Header**: El nombre del asistente
+- **Mensaje de Bienvenida**: Lo que aparece primero
+- **Placeholder**: Texto en el campo de input
+
+#### Colores
+- **Color Primario**: Header y elementos principales
 - **Color Secundario**: Gradiente del header
-- **Botón**: Color de fondo del botón flotante
-- **Icono del Botón**: Color del icono svg
-- **Burbuja Usuario**: Color de fondo de tus mensajes
-- **Burbuja Bot**: Color de fondo de los mensajes del bot
-- **Texto Usuario**: Color del texto de tus mensajes
-- **Texto Bot**: Color del texto de los mensajes del bot
+- **Botón e Icono**: Colores del botón flotante
+- **Burbujas**: Colores de los mensajes (usuario y bot)
+- **Textos**: Colores del texto en cada burbuja
 
-#### Dimensiones Recomendadas
-- **Ancho**: 350-420px (mínimo 280px, máximo 600px)
-- **Alto**: 450-550px (mínimo 300px, máximo 800px)
-- **Border Radius**: 12-20px para aspecto moderno
-- **Tamaño del Botón**: 56-64px para buena visibilidad
-- **Espaciado de Mensajes**: 12-20px para legibilidad
+#### Tipografía
+- **Familia de Fuente**: Google Fonts o fuentes del sistema
+- **Tamaño de Fuente**: 11px a 20px
 
-### Configuración de Webhook
+#### Dimensiones
+- **Ancho**: 280px a 600px (recomendado: 350-420px)
+- **Alto**: 300px a 800px (recomendado: 450-550px)
+- **Border Radius**: Para bordes redondeados
+- **Tamaño del Botón**: 40px a 100px
 
-#### URL del Webhook
+### Paso 9: Configurar Webhook para WhatsApp
+
+1. Ve a **AI Agent > Configuración > Webhook**
+2. Copia la URL del webhook:
+
 ```
 https://tu-sitio.com/wp-json/ai-agent/v1/webhook
 ```
 
-#### Integración con Twilio WhatsApp
-1. Configura tu Webhook de Twilio pointing a la URL del webhook
-2. Twilio enviará mensajes POST con `From` y `Body`
+#### Configurar en Twilio
+1. En Twilio, ve a tu número de WhatsApp
+2. En **Webhook**, ingresa la URL anterior
+3. Selecciona **"POST"** como método
 
-#### Integración con Meta WhatsApp Business
-1. Configura el webhook de tu app de Meta Business
-2. Asegúrate de que el payload contenga `entry[0].changes[0].value.messages`
+#### Configurar en Meta WhatsApp Business
+1. En tu app de Meta, configura el webhook
+2. Usa la misma URL del webhook
+3. Verifica el webhook desde Meta
 
-## Session Cache
+### Paso 10: Ver Dashboard
 
-El plugin implementa un sistema de caché por sesión para respuestas rápidas:
+Ve a **AI Agent > Dashboard** para ver:
+- Conversaciones totales y de hoy
+- Mensajes y tokens usados
+- Costo en dólares
+- Estado de la base de conocimiento
+- Uso por modelo LLM
+- Conversaciones recientes
 
-1. **Primera consulta**: Busca en la base vectorial externa y carga los contextos más relevantes
-2. **Consultas siguientes**: Usa el contexto cacheado (no vuelve a buscar)
-3. **TTL**: El caché expira después de 15-30 minutos de inactividad
-4. **Auto-refresh**: Cuando los tokens usados se acercan al límite, recarga contexto
+---
 
-**Rendimiento esperado**:
-- Primera consulta: 500-2000ms (depende del servicio externo)
-- Consultas en caché: <100ms
+## Session Cache - Cómo Funciona
 
-## Base de Datos
+El plugin usa un sistema de caché por sesión para responder rápidamente:
 
-El plugin crea las siguientes tablas:
+```
+┌─────────────────────────────────────────────────────┐
+│                  USER MESSAGE                       │
+└─────────────────────┬───────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────┐
+│         ¿Session tiene contexto válido?              │
+│         (TTL: 15-30 min configurable)               │
+└─────────────────────┬───────────────────────────────┘
+          ┌──────────┴──────────┐
+          ▼                     ▼
+       SÍ                      NO
+   Respuesta               Buscar en Vector DB
+   rápida (<100ms)        (500-2000ms)
+                              ▼
+                       Cargar top 5 resultados
+                              ▼
+                       Guardar en Session Cache
+                              ▼
+                       Responder al usuario
+```
+
+**Beneficios**:
+- Primera consulta: Busca en la base vectorial y cachea resultados
+- Consultas siguientes: Usa el caché (respuesta en <100ms)
+- Auto-refresh: Cuando los tokens se acercan al límite, recarga contexto
+
+---
+
+## Requisitos
+
+- WordPress 6.0 o superior
+- PHP 8.1 o superior
+- Extensión PHP `pg` (para PostgreSQL)
+- WooCommerce (opcional, para integración de productos)
+- API Key de OpenAI o Anthropic (opcional)
+
+---
+
+## Tablas de Base de Datos
+
+El plugin crea las siguientes tablas en WordPress:
 
 | Tabla | Descripción |
 |-------|-------------|
-| `ai_agent_conversations` | Registro de conversaciones con session_id, phone, role, stats |
-| `ai_agent_messages` | Mensajes individuales con tokens y costos |
-| `ai_agent_product_fiches` | Fichas optimizadas de productos para LLM |
-| `ai_agent_knowledge_index` | Índice de conocimiento vectorial |
-| `ai_agent_campaigns` | Campañas activas con códigos de descuento |
-| `ai_agent_cart` | Carrito de compras por conversación |
-| `ai_agent_metrics_daily` | Métricas diarias agregadas |
-| `ai_agent_token_usage` | Uso de tokens por modelo LLM |
-| `ai_agent_session_cache` | Caché de contexto por sesión |
+| `ai_agent_conversations` | Registro de conversaciones |
+| `ai_agent_messages` | Mensajes con tokens y costos |
+| `ai_agent_product_fiches` | Fichas de productos |
+| `ai_agent_knowledge_index` | Índice de conocimiento |
+| `ai_agent_campaigns` | Campañas activas |
+| `ai_agent_cart` | Carrito por conversación |
+| `ai_agent_metrics_daily` | Métricas diarias |
+| `ai_agent_token_usage` | Uso de tokens |
+| `ai_agent_session_cache` | Caché de sesión |
 
-## Scheduler
-
-El plugin ejecuta automáticamente:
-
-- **Indexación hourly**: Verifica cambios en páginas y productos cada hora
-- **Sync a externo**: Sincroniza contenido al servicio externo según intervalo configurado
-- **Métricas daily**: Actualiza métricas diarias a medianoche
-- **Cleanup daily**: Limpia datos antiguos según retención configurada (90 días por defecto)
+---
 
 ## Hooks y Filtros
 
 ### `ai_agent_system_prompt`
-Permite modificar el prompt del sistema.
+Modifica el prompt del sistema:
 
 ```php
 add_filter('ai_agent_system_prompt', function($prompt, $context) {
@@ -315,7 +329,7 @@ add_filter('ai_agent_system_prompt', function($prompt, $context) {
 ```
 
 ### `ai_agent_llm_response`
-Permite modificar la respuesta del LLM.
+Modifica la respuesta del LLM:
 
 ```php
 add_filter('ai_agent_llm_response', function($response) {
@@ -323,85 +337,40 @@ add_filter('ai_agent_llm_response', function($response) {
 });
 ```
 
-### `ai_agent_cart_url`
-Permite modificar la URL del carrito.
-
-```php
-add_filter('ai_agent_cart_url', function($url, $conversation_id) {
-    return $url;
-}, 10, 2);
-```
-
-### `ai_agent_custom_kb_search_payload`
-Permite modificar el payload enviado a APIs custom.
-
-```php
-add_filter('ai_agent_custom_kb_search_payload', function($payload, $config) {
-    $payload['custom_param'] = 'value';
-    return $payload;
-}, 10, 2);
-```
+---
 
 ## FAQs
 
 ### ¿Puedo usar el plugin sin API key de OpenAI?
-Sí, puedes usar Ollama para ejecutar modelos localmente sin costo en API keys.
+Sí, puedes usar Ollama para ejecutar modelos localmente.
 
 ### ¿Cómo funciona la búsqueda semántica?
-El plugin convierte el contenido a vectores numéricos usando embeddings. Cuando un usuario hace una pregunta, se compara el vector de la pregunta con los vectores del contenido para encontrar el más similar.
+El plugin convierte contenido a vectores usando embeddings. Cuando un usuario pregunta, se comparan vectores para encontrar el contenido más relevante.
 
 ### ¿Puedo personalizar los mensajes del bot?
-Sí, desde AI Agent > Configuración puedes cambiar el mensaje de bienvenida, saludo, mensaje fuera de horario, y configurar campañas.
+Sí, desde AI Agent > Configuración puedes cambiar saludo, mensaje fuera de horario, y configurar campañas.
 
 ### ¿El plugin funciona con WhatsApp Business?
-Sí, a través del webhook REST. Necesitarás configurar el webhook en tu app de Meta o en Twilio.
-
-### ¿Puedo usar mi propio logo?
-Sí, en la configuración del widget puedes subir un logo personalizado o usar el icono de tu sitio.
-
-### ¿Cómo funciona el carrito de compras?
-Cuando el agente tiene rol "vendedor" y detecta intención de compra, puede agregar productos al carrito. El carrito se mantiene por session_id y permite generar links de checkout directamente.
-
-### ¿Qué métricas puedo ver?
-Puedes ver: conversaciones totales, mensajes, tokens usados, costo en USD, consumo por modelo LLM, métricas diarias con gráficos, y historial de conversaciones.
+Sí, a través del webhook REST configurando Twilio o Meta.
 
 ### ¿Puedo conectar a Pinecone, PostgreSQL o Supabase?
-Sí, el plugin soporta:
-- **Pinecone**: Vector database cloud
-- **PostgreSQL + pgvector**: Tu propio servidor
-- **Supabase**: PostgreSQL managed
-- **Custom API**: Cualquier endpoint compatible
+Sí, el plugin soporta los tres servicios externos. Consulta la sección de configuración para cada uno.
 
-Esto permite compartir la base de conocimiento entre múltiples sitios WordPress.
-
-### ¿Cómo funciona el Session Cache?
-El Session Cache permite respuestas rápidas sin buscar en la base vectorial en cada consulta:
-1. Primera consulta: Busca en la KB externa, carga top resultados, guarda en caché
-2. Consultas siguientes: Usa el contexto cacheado
-3. El caché expira según el TTL configurado (15-30 min por defecto)
-4. Cuando los tokens se acercan al límite, recarga contexto automáticamente
+---
 
 ## Changelog
 
+### 1.0.2
+- Session Cache integrado en el Agente para respuestas rápidas
+- Mejoras en el flujo de contexto
+
 ### 1.0.1
-- Añadido soporte para base de conocimiento externa (Pinecone, PostgreSQL, Supabase, Custom API)
-- Implementado Session Cache para respuestas rápidas
-- Mejorado sistema de sync automático
+- Soporte para base de conocimiento externa (Pinecone, PostgreSQL, Supabase, Custom API)
 
 ### 1.0.0
 - Versión inicial completa
-- Soporte para OpenAI, Anthropic y Ollama
-- Base de conocimiento vectorial con embeddings
-- Integración con WooCommerce (fichas de productos, carrito, checkout)
-- Widget de chat personalizable
-- Sistema de webhooks para WhatsApp/Twilio/Meta
-- Dashboard con métricas y gráficos
-- Roles de agente (asesor/vendedor)
-- Horarios de atención configurables
-- Sistema de campañas y códigos de descuento
-- Scheduler automático para indexación
-- Historial de conversaciones completo
-- Estimación de costos en dólares
+
+---
 
 ## Créditos
 
